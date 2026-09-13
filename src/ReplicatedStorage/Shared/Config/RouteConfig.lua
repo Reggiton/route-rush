@@ -46,7 +46,7 @@ RouteConfig.DestinationMinAhead = 1
 RouteConfig.DestinationMaxAhead = 4
 -- Deadline for a passenger = now + (studs to destination / ReferenceSpeed)
 --   * DeadlineSlack + DeadlineFlatSeconds
-RouteConfig.ReferenceSpeed = 45
+RouteConfig.ReferenceSpeed = 60
 RouteConfig.DeadlineSlack = 1.5
 RouteConfig.DeadlineFlatSeconds = 10
 

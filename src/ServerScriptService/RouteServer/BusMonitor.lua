@@ -4,9 +4,15 @@
 	Server-side watcher for every released bus. Clients own their bus's
 	physics, so the server judges what happened from replicated motion:
 
-	  - Collisions: a speed drop bigger than the bus's own brakes could
-	    produce in one sample = an impact. Damage scales with the excess
-	    and the Health upgrade. At 0 health the bus breaks down.
+	  - Collisions: BOTH must be true to count as an impact --
+	      1. a real slowdown, measured from replicated POSITIONS over a
+	         short window (velocity readings from a client-owned bus are
+	         too noisy to trust), bigger than the bus's own brakes could
+	         cause, and
+	      2. something solid (curb, obstacle, another bus) is actually
+	         touching the bus's collision box right now.
+	    Damage scales with the excess slowdown and the Health upgrade.
+	    At 0 health the bus breaks down.
 	  - Sanity: sustained over-speed, teleports, falling off the world,
 	    or lying on its side -> server reclaims and resets it to the road.
 
@@ -23,18 +29,25 @@ local BusStats = require(ReplicatedStorage.Shared.Modules.BusStats)
 local BusSpawner = require(script.Parent.BusSpawner)
 local TrackBuilder = require(script.Parent.TrackBuilder)
 
+local Remotes = ReplicatedStorage:WaitForChild("Remotes")
+local StopEvent = Remotes:WaitForChild("StopEvent")
+
 local C = DrivingConfig.Collision
 
 local BusMonitor = {}
 
 local connection
 local callbacks = {}
-local samples = {} -- [Player] = { bus, lastSpeed, lastPosition, lastTime, cooldownUntil, speedStrikes, flippedSince }
+local states = {} -- [Player] = { bus, history = {{t, position}}, cooldownUntil, speedStrikes, flippedSince }
 local accumulator = 0
+
+local function horizontal(vector)
+	return Vector3.new(vector.X, 0, vector.Z).Magnitude
+end
 
 local function resetBus(player, record, position)
 	BusSpawner.ResetTo(player, TrackBuilder.NearestRoadCFrame(record.track, position))
-	samples[player] = nil
+	states[player] = nil
 end
 
 local function breakDown(player, bus, stats)
@@ -51,56 +64,81 @@ local function breakDown(player, bus, stats)
 	end)
 end
 
+-- The newest history entry at least `age` seconds old (or the oldest one).
+local function entryAtAge(history, now, age)
+	for i = #history, 1, -1 do
+		if now - history[i].t >= age then
+			return history[i]
+		end
+	end
+	return history[1]
+end
+
+-- Returns the first solid thing touching the bus's sides/front/back/top, or nil.
+-- The query box starts 1 stud above the Root's bottom so the road under a
+-- hovering bus never counts.
+local function findContact(player, bus, root)
+	local params = OverlapParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	local exclude = { bus }
+	if player.Character then
+		table.insert(exclude, player.Character)
+	end
+	params.FilterDescendantsInstances = exclude
+
+	local size = root.Size + Vector3.new(C.ContactMargin * 2, -1, C.ContactMargin * 2)
+	local parts = workspace:GetPartBoundsInBox(root.CFrame * CFrame.new(0, 0.5, 0), size, params)
+	for _, part in ipairs(parts) do
+		if part.CanCollide and not (part.Parent and part.Parent:FindFirstChildOfClass("Humanoid")) then
+			return part
+		end
+	end
+	return nil
+end
+
 local function sample(player, record, now)
 	local bus = record.bus
 	local root = bus.PrimaryPart
 	if not root or not root.Parent then
 		return
 	end
-
-	local stats = BusStats.Compute(record.chassisId, record.levels, bus:GetAttribute("Passengers") or 0)
-	local velocity = root.AssemblyLinearVelocity
-	local speed = Vector3.new(velocity.X, 0, velocity.Z).Magnitude
 	local position = root.Position
 
-	local state = samples[player]
+	local state = states[player]
 	if not state or state.bus ~= bus then
-		samples[player] = {
+		state = {
 			bus = bus,
-			lastSpeed = speed,
-			lastPosition = position,
-			lastTime = now,
-			cooldownUntil = 0,
+			history = {},
+			cooldownUntil = now + C.ImpactCooldown,
 			speedStrikes = 0,
 			flippedSince = nil,
 		}
+		states[player] = state
+	end
+
+	local history = state.history
+	local previous = history[#history]
+	table.insert(history, { t = now, position = position })
+	while #history > 2 and now - history[1].t > C.HistorySeconds do
+		table.remove(history, 1)
+	end
+	if not previous then
 		return
 	end
-	local elapsed = math.max(now - state.lastTime, 1e-3)
+
+	local stats = BusStats.Compute(record.chassisId, record.levels, bus:GetAttribute("Passengers") or 0)
 
 	-- Falling out of the world
 	if position.Y < record.track.center.Y + C.FallResetY then
-		resetBus(player, record, state.lastPosition)
+		resetBus(player, record, previous.position)
 		return
 	end
 
 	-- Teleport check
-	local moved = Vector3.new(position.X - state.lastPosition.X, 0, position.Z - state.lastPosition.Z).Magnitude
-	local expected = math.max(state.lastSpeed, speed, stats.topSpeed) * elapsed
-	if moved > expected + C.MaxTeleportStuds then
-		resetBus(player, record, state.lastPosition)
+	local elapsed = math.max(now - previous.t, 1e-3)
+	if horizontal(position - previous.position) > stats.topSpeed * C.SpeedTolerance * elapsed + C.MaxTeleportStuds then
+		resetBus(player, record, previous.position)
 		return
-	end
-
-	-- Over-speed check
-	if speed > stats.topSpeed * C.SpeedTolerance + 5 then
-		state.speedStrikes = state.speedStrikes + 1
-		if state.speedStrikes >= C.SpeedStrikesToReset then
-			resetBus(player, record, position)
-			return
-		end
-	else
-		state.speedStrikes = 0
 	end
 
 	-- On its side / roof
@@ -114,26 +152,59 @@ local function sample(player, record, now)
 		state.flippedSince = nil
 	end
 
-	-- Impact check
-	local drop = state.lastSpeed - speed
-	local allowed = stats.brakeDecel * elapsed * C.BrakeSlack
-	local excess = drop - allowed
-	if excess > C.ImpactMinDrop and now >= state.cooldownUntil and not bus:GetAttribute("BrokenDown") then
-		state.cooldownUntil = now + C.ImpactCooldown
-		local damage = math.floor(excess * C.DamagePerStudPerSecond * stats.damageMult + 0.5)
-		local health = math.max(0, (bus:GetAttribute("Health") or stats.maxHealth) - damage)
-		bus:SetAttribute("Health", health)
-		if callbacks.onImpact then
-			callbacks.onImpact(player, damage)
+	-- Speeds from positions: the last RecentWindow seconds vs the BeforeWindow before it.
+	local recentEntry = entryAtAge(history, now, C.RecentWindow)
+	local recentSpan = now - recentEntry.t
+	if recentSpan < C.RecentWindow * 0.5 then
+		return
+	end
+	local recentSpeed = horizontal(position - recentEntry.position) / recentSpan
+
+	-- Over-speed check
+	if recentSpeed > stats.topSpeed * C.SpeedTolerance + 5 then
+		state.speedStrikes = state.speedStrikes + 1
+		if state.speedStrikes >= C.SpeedStrikesToReset then
+			resetBus(player, record, position)
+			return
 		end
-		if health <= 0 then
-			breakDown(player, bus, stats)
-		end
+	else
+		state.speedStrikes = 0
 	end
 
-	state.lastSpeed = speed
-	state.lastPosition = position
-	state.lastTime = now
+	local beforeEntry = entryAtAge(history, recentEntry.t, C.BeforeWindow)
+	local beforeSpan = recentEntry.t - beforeEntry.t
+	if beforeSpan < C.BeforeWindow * 0.5 then
+		return
+	end
+	local beforeSpeed = horizontal(recentEntry.position - beforeEntry.position) / beforeSpan
+
+	-- Impact check
+	if now < state.cooldownUntil or bus:GetAttribute("BrokenDown") or beforeSpeed < C.ImpactMinSpeed then
+		return
+	end
+	local drop = beforeSpeed - recentSpeed
+	local allowed = stats.brakeDecel * (recentSpan + beforeSpan) * 0.5 * C.BrakeSlack
+	local excess = drop - allowed
+	if excess < C.ImpactMinDrop then
+		return
+	end
+	local hitPart = findContact(player, bus, root)
+	if not hitPart then
+		return
+	end
+
+	state.cooldownUntil = now + C.ImpactCooldown
+	local damage = math.max(1, math.floor(excess * C.DamagePerStudPerSecond * stats.damageMult + 0.5))
+	local health = math.max(0, (bus:GetAttribute("Health") or stats.maxHealth) - damage)
+	bus:SetAttribute("Health", health)
+
+	StopEvent:FireClient(player, { kind = "impact", damage = damage, what = hitPart.Name })
+	if callbacks.onImpact then
+		callbacks.onImpact(player, damage)
+	end
+	if health <= 0 then
+		breakDown(player, bus, stats)
+	end
 end
 
 function BusMonitor.Start(newCallbacks)
@@ -162,7 +233,7 @@ function BusMonitor.Stop()
 		connection:Disconnect()
 		connection = nil
 	end
-	samples = {}
+	states = {}
 	callbacks = {}
 end
 
