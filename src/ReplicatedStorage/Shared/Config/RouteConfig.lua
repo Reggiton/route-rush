@@ -50,9 +50,13 @@ RouteConfig.GridSlots = 24 -- 2 per row
 
 -- Stops & passengers ------------------------------------------------------------------
 RouteConfig.StopCount = 8
-RouteConfig.StopRadius = 22 -- radius of the glowing ring (studs); inside it = "at the stop"
-RouteConfig.StopRingSegments = 40 -- smoothness of the ring
-RouteConfig.StopColumnHeight = 40 -- faint light column above each ring (0 = none)
+-- Each stop is a glowing rectangular bay in the left lane. A bus is "at the stop"
+-- while its center is inside the bay -- it's narrower than the road, so drivers
+-- have to steer into it.
+RouteConfig.StopBayWidth = 12 -- studs across (one lane is RoadWidth / 2 = 14)
+RouteConfig.StopBayLength = 34 -- studs along the road
+RouteConfig.StopBayMargin = 1.5 -- extra tolerance around the bay edges (studs)
+RouteConfig.StopGlowHeight = 2.5 -- low light walls along the bay's sides (0 = none)
 
 -- Boarding on the move ------------------------------------------------------------------
 -- Drive through a stop's ring and press (or hold) E to load passengers. You don't

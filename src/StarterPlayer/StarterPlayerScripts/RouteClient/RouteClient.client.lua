@@ -72,8 +72,8 @@ end
 ProfileUpdated.OnClientEvent:Connect(function(snapshot)
 	local profile = hud.profile
 	profile.cash.Text = Format.Cash(snapshot.cash)
-	profile.level.Text = tostring(snapshot.level)
-	profile.rep.Text = Format.Number(snapshot.reputation)
+	profile.level.Text = "Lv " .. snapshot.level
+	profile.rep.Text = "Rep " .. Format.Number(snapshot.reputation)
 	UIKit.SetFill(profile.xpFill, snapshot.xpForNext and snapshot.xpIntoLevel / snapshot.xpForNext or 1)
 end)
 
@@ -341,7 +341,6 @@ RunService.RenderStepped:Connect(function()
 	status.phase.Text = string.upper(PHASE_TEXT[phase] or phase)
 	status.timer.Text = phase == "Waiting" and "—" or Format.Time(remaining)
 	status.fares.Visible = racing and phase == "Running"
-	status.panel.Size = UDim2.fromOffset(status.fares.Visible and 310 or 200, 70)
 	local length = PHASE_LENGTH[phase]
 	UIKit.SetFill(status.progress, length and math.clamp(remaining / length, 0, 1) or 0)
 
