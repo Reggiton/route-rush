@@ -157,13 +157,39 @@ tunable number lives in a Config file.**
 | Add/rename a category or change max level | `UpgradeConfig.Categories` / `MaxLevel` (+ `DrivingConfig.PerLevel`, `RouteConfig.PowerWeights`) |
 | Add or retune a chassis tier | `UpgradeConfig.ChassisTiers` |
 | Real upgrade models | `UpgradeModelProvider.GetModel()` |
-| Real bus models | `BusBuilder.BuildBaseBus()` (keep the contract in its header) |
+| Real bus models | put a Model named `Tier1`–`Tier4` in `ReplicatedStorage.GarageAssets.Buses` (see *Using your bus models*) |
 | A real garage room | add `Workspace.GarageScene.GarageAnchor` (Part) |
 | A real lobby | add `Workspace.Lobby` with a SpawnLocation |
 | A hand-built route | add `Workspace.RouteMap` (Model); tag stop parts `RouteStop` + `Index` attribute, optional grid parts `RouteGrid` + `Index` |
 | Cross-server matchmaking | replace `BracketService.Assign()` |
 | Retime the garage swap animation | `TIMING` in `GarageSwapSequence.lua` |
 | Upgrade names changed in the spreadsheet | regenerate `UpgradeCatalog.lua` (don't hand-edit) |
+
+## Using your bus models
+
+`BusBuilder` uses a real model for any tier that has one and a block
+placeholder for tiers that don't. It works for both the garage and the
+drivable bus.
+
+1. In Studio, rename each bus Model to its tier: `Tier1`, `Tier2`, `Tier3`, `Tier4`.
+2. Drag it into **ReplicatedStorage → GarageAssets → Buses**. This folder is
+   set to `ignoreUnknownInstances`, so Rojo won't delete what you put there.
+3. **Share it with the team:** right-click the model → *Save to File…* →
+   save as `src/ReplicatedStorage/GarageAssets/Buses/Tier1.rbxm` (etc.) and
+   commit it. Rojo then syncs it into everyone's Studio.
+
+The model doesn't need any setup: it's centered, fitted with an invisible
+collision box, welded, and made non-colliding automatically, and scripts
+inside it are removed. Optional tweaks (attributes on the Model):
+
+| Attribute | Default | Use when... |
+|---|---|---|
+| `FrontAxis` | `"-Z"` | the bus drives backwards or sideways; try `"+Z"`, `"+X"`, `"-X"` |
+| `Scale` | `1` | the bus is too big or small |
+| `RideHeight` | 15% of height | the bus floats or sinks into the road |
+
+Optional children: `Attachment`s named `Engine`/`Accel`/`Brakes`/`Handles`/`Health`
+(where upgrade parts attach) and a `Seat` named `DriverSeat` (where the driver sits).
 
 ## Testing
 

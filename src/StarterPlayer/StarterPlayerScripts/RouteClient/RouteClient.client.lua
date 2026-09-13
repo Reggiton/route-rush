@@ -349,6 +349,17 @@ RunService.RenderStepped:Connect(function()
 			hud.dropLabel.Text = "No passengers — stop at a bus stop to load"
 		end
 	end
+
+	-- If throttle is held but the bus can't move, say why.
+	if telemetry and telemetry.problem then
+		hud.streakLabel.Text = "⚠ " .. telemetry.problem
+		hud.streakLabel.TextColor3 = Color3.fromRGB(240, 160, 90)
+	else
+		hud.streakLabel.TextColor3 = Color3.fromRGB(170, 170, 180)
+		if not runState then
+			hud.streakLabel.Text = ""
+		end
+	end
 end)
 
 -- Results ----------------------------------------------------------------------------------------------------
