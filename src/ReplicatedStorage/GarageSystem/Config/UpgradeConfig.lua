@@ -2,17 +2,10 @@
 	UpgradeConfig.lua
 
 	Single source of truth for garage upgrade categories, levels, and
-<<<<<<< HEAD
 	chassis tiers. EDIT THIS FILE to add/remove a category, change the
 	max level, or retune a chassis — no other script hardcodes any of
 	this, so the GUI, the bus builder, the driving stats, and the server
 	all update automatically.
-=======
-	chassis data. EDIT THIS FILE to add/remove a category, change the
-	max level, or add a chassis tier — no other script hardcodes any
-	of this, so the GUI, the bus builder, and the server all update
-	automatically.
->>>>>>> 5ebfa8a40e59ed118b29d72e4a85019bc0f8a642
 ]]
 
 local UpgradeConfig = {}
@@ -30,7 +23,6 @@ UpgradeConfig.Categories = {
 UpgradeConfig.MinLevel = 0 -- 0 = nothing installed (base bus)
 UpgradeConfig.MaxLevel = 9 -- matches the 9-level equipment list
 
-<<<<<<< HEAD
 --[[
 	Chassis tiers, in unlock order.
 
@@ -42,16 +34,10 @@ UpgradeConfig.MaxLevel = 9 -- matches the 9-level equipment list
 	                passenger load modify them.
 	body            Placeholder block-bus shape used by BusBuilder.
 ]]
-=======
--- Chassis tiers. Only Tier1 exists for now (placeholder block bus).
--- Add Tier2/3/4 here later — nothing else needs to change as long as
--- BusBuilder knows how to build each id.
->>>>>>> 5ebfa8a40e59ed118b29d72e4a85019bc0f8a642
 UpgradeConfig.ChassisTiers = {
 	{
 		id = "Tier1",
 		displayName = "Beat-Up Local Minibus",
-<<<<<<< HEAD
 		requiredLevel = 1,
 		price = 0,
 		priceMultiplier = 1,
@@ -148,14 +134,11 @@ UpgradeConfig.ChassisTiers = {
 			color = Color3.fromRGB(30, 140, 110),
 			stripeColor = Color3.fromRGB(245, 245, 245),
 		},
-=======
->>>>>>> 5ebfa8a40e59ed118b29d72e4a85019bc0f8a642
 	},
 }
 
 UpgradeConfig.DefaultChassisId = "Tier1"
 
-<<<<<<< HEAD
 -- Returns the tier table for an id, or nil.
 function UpgradeConfig.GetChassis(chassisId)
 	for index, tier in ipairs(UpgradeConfig.ChassisTiers) do
@@ -166,6 +149,4 @@ function UpgradeConfig.GetChassis(chassisId)
 	return nil
 end
 
-=======
->>>>>>> 5ebfa8a40e59ed118b29d72e4a85019bc0f8a642
 return UpgradeConfig
