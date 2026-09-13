@@ -65,6 +65,11 @@ function BusSpawner.Spawn(player, track, slotIndex)
 	local bus = BusBuilder.BuildBaseBus(chassisId, { anchored = true, withSeat = true })
 	BusUpgradeApplier.ApplyState(bus, levels)
 	bus.Name = "Bus_" .. player.UserId
+	-- With StreamingEnabled, send the whole bus to clients at once so the
+	-- driver never sees a bus without its Root.
+	pcall(function()
+		bus.ModelStreamingMode = Enum.ModelStreamingMode.Atomic
+	end)
 
 	for category, level in pairs(levels) do
 		bus:SetAttribute("Lv_" .. category, level)
@@ -80,6 +85,9 @@ function BusSpawner.Spawn(player, track, slotIndex)
 	local ground = track.grid[slotIndex] or track.grid[#track.grid]
 	bus:PivotTo(ground + Vector3.new(0, bus:GetAttribute("RootHeight"), 0))
 	bus.Parent = track.busesFolder
+	task.spawn(pcall, function()
+		player:RequestStreamAroundAsync(ground.Position, 5)
+	end)
 
 	local record = {
 		bus = bus,
@@ -123,8 +131,15 @@ function BusSpawner.Release(player)
 	end
 	BusBuilder.SetAnchored(record.bus, false)
 	record.released = true
+
+	local root = record.bus.PrimaryPart
+	local canSet, reason = root:CanSetNetworkOwnership()
+	if not canSet then
+		warn("BusSpawner: can't give " .. player.Name .. " control of their bus: " .. tostring(reason))
+		return
+	end
 	local ok, err = pcall(function()
-		record.bus.PrimaryPart:SetNetworkOwner(player)
+		root:SetNetworkOwner(player)
 	end)
 	if not ok then
 		warn("BusSpawner: could not give network ownership to " .. player.Name .. ": " .. tostring(err))
