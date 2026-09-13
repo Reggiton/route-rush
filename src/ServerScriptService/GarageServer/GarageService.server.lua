@@ -16,7 +16,8 @@
 	  - Lowering levels refunds RespecRefundRate of those slots' price.
 	  - Chassis are bought with cash once the player's Level is high enough.
 	  - Confirming on a chassis also makes it the one you drive.
-	  - The garage is closed while a route is counting down or running.
+	  - The garage is closed for players who are in a race (InRace
+	    player attribute); everyone waiting in the lobby can use it.
 ]]
 
 local Players = game:GetService("Players")
@@ -40,11 +41,6 @@ local RequestConfirm = Remotes:WaitForChild("RequestConfirm")
 local UpgradesConfirmed = Remotes:WaitForChild("UpgradesConfirmed")
 local GarageError = Remotes:WaitForChild("GarageError")
 
-local CLOSED_PHASES = {
-	Countdown = true,
-	Running = true,
-}
-
 -- [Player] = { chassisId = string, pending = {category = level} }
 local sessions = {}
 
@@ -56,8 +52,8 @@ local function copyLevels(levels)
 	return copy
 end
 
-local function garageIsOpenForPhase()
-	return not CLOSED_PHASES[ReplicatedStorage:GetAttribute("SessionPhase") or "Intermission"]
+local function garageIsOpenFor(player)
+	return not player:GetAttribute("InRace")
 end
 
 local function buildState(player)
@@ -137,12 +133,12 @@ end
 -- Remote handlers ----------------------------------------------------------------------
 
 OpenGarage.OnServerEvent:Connect(function(player)
-	if not garageIsOpenForPhase() then
-		GarageError:FireClient(player, "The garage is closed during a route.")
+	if not garageIsOpenFor(player) then
+		GarageError:FireClient(player, "The garage is closed while you're in a race.")
 		return
 	end
 	local data = PlayerDataService.WaitForProfile(player)
-	if not data or not garageIsOpenForPhase() then
+	if not data or not garageIsOpenFor(player) then
 		return
 	end
 
@@ -210,8 +206,8 @@ RequestConfirm.OnServerEvent:Connect(function(player)
 	if not session or not PlayerDataService.Get(player) then
 		return
 	end
-	if not garageIsOpenForPhase() then
-		GarageError:FireClient(player, "The garage is closed during a route.")
+	if not garageIsOpenFor(player) then
+		GarageError:FireClient(player, "The garage is closed while you're in a race.")
 		return
 	end
 
@@ -254,13 +250,18 @@ PlayerDataService.Changed.Event:Connect(function(player)
 	end
 end)
 
-ReplicatedStorage:GetAttributeChangedSignal("SessionPhase"):Connect(function()
-	if not garageIsOpenForPhase() then
-		for player in pairs(sessions) do
+-- Close a player's garage the moment they're put into a race.
+local function watchInRace(player)
+	player:GetAttributeChangedSignal("InRace"):Connect(function()
+		if player:GetAttribute("InRace") then
 			closeSession(player, true)
 		end
-	end
-end)
+	end)
+end
+Players.PlayerAdded:Connect(watchInRace)
+for _, player in ipairs(Players:GetPlayers()) do
+	watchInRace(player)
+end
 
 Players.PlayerRemoving:Connect(function(player)
 	sessions[player] = nil

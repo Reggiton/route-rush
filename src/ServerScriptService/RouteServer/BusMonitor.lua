@@ -40,6 +40,7 @@ local connection
 local callbacks = {}
 local states = {} -- [Player] = { bus, history = {{t, position}}, cooldownUntil, speedStrikes, flippedSince }
 local accumulator = 0
+local distances = {} -- [Player] = studs driven this race (kept after Stop for idle checks)
 
 local function horizontal(vector)
 	return Vector3.new(vector.X, 0, vector.Z).Magnitude
@@ -125,6 +126,7 @@ local function sample(player, record, now)
 	if not previous then
 		return
 	end
+	distances[player] = (distances[player] or 0) + horizontal(position - previous.position)
 
 	local stats = BusStats.Compute(record.chassisId, record.levels, bus:GetAttribute("Passengers") or 0)
 
@@ -211,6 +213,7 @@ function BusMonitor.Start(newCallbacks)
 	BusMonitor.Stop()
 	callbacks = newCallbacks or {}
 	accumulator = 0
+	distances = {}
 
 	connection = RunService.Heartbeat:Connect(function(dt)
 		accumulator = accumulator + dt
@@ -235,6 +238,11 @@ function BusMonitor.Stop()
 	end
 	states = {}
 	callbacks = {}
+end
+
+-- Studs a player's bus has driven since the race started (0 if unknown).
+function BusMonitor.GetDistance(player)
+	return distances[player] or 0
 end
 
 return BusMonitor
