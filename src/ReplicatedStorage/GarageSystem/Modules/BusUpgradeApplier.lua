@@ -27,11 +27,7 @@ end
 function BusUpgradeApplier.ApplyCategory(bus, category, level)
 	clearCategory(bus, category)
 
-<<<<<<< HEAD
 	local model = UpgradeModelProvider.GetModel(category, level, bus:GetAttribute("ChassisId"))
-=======
-	local model = UpgradeModelProvider.GetModel(category, level)
->>>>>>> 5ebfa8a40e59ed118b29d72e4a85019bc0f8a642
 	if not model then
 		return -- level 0: nothing to attach
 	end
