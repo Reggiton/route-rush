@@ -2,12 +2,19 @@
 	GarageController.client.lua
 
 	Builds a fully local, private garage scene: a cloned copy of your
+<<<<<<< HEAD
 	own avatar plus a bus, positioned via GarageLayout, visible only on
 	your screen. Your REAL character just freezes in place while the menu
 	is open -- nothing about the scene replicates anywhere.
 
 	The server is authoritative for levels, cash, and chassis. Every
 	garage remote delivers a full state table; this script renders it.
+=======
+	own avatar plus a cloned bus, positioned via GarageLayout, visible
+	only on your screen. Your REAL character just freezes in place
+	while the menu is open -- nothing about this replicates to the
+	server or other players.
+>>>>>>> 5ebfa8a40e59ed118b29d72e4a85019bc0f8a642
 ]]
 
 local Players = game:GetService("Players")
@@ -18,11 +25,15 @@ local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
 local GarageSystem = ReplicatedStorage:WaitForChild("GarageSystem")
+<<<<<<< HEAD
 local Shared = ReplicatedStorage:WaitForChild("Shared")
+=======
+>>>>>>> 5ebfa8a40e59ed118b29d72e4a85019bc0f8a642
 local UpgradeConfig = require(GarageSystem.Config.UpgradeConfig)
 local BusBuilder = require(GarageSystem.Modules.BusBuilder)
 local BusUpgradeApplier = require(GarageSystem.Modules.BusUpgradeApplier)
 local GarageLayout = require(GarageSystem.Modules.GarageLayout)
+<<<<<<< HEAD
 local UpgradeCatalog = require(GarageSystem.Config.UpgradeCatalog)
 local BusStats = require(Shared.Modules.BusStats)
 local GarageGuiBuilder = require(script.Parent.GarageGuiBuilder)
@@ -169,6 +180,51 @@ end
 
 -- Real character ------------------------------------------------------------------------------
 
+=======
+local GarageGuiBuilder = require(script.Parent.GarageGuiBuilder)
+local GarageSwapSequence = require(script.Parent.GarageSwapSequence)
+
+local Remotes = GarageSystem:WaitForChild("Remotes")
+local OpenGarage = Remotes:WaitForChild("OpenGarage")
+local GarageReady = Remotes:WaitForChild("GarageReady")
+local RequestSetLevel = Remotes:WaitForChild("RequestSetLevel")
+local PendingLevelUpdated = Remotes:WaitForChild("PendingLevelUpdated")
+local RequestConfirm = Remotes:WaitForChild("RequestConfirm")
+local UpgradesConfirmed = Remotes:WaitForChild("UpgradesConfirmed")
+
+local gui = GarageGuiBuilder.Build(playerGui)
+
+local pendingLevels = {}
+for _, category in ipairs(UpgradeConfig.Categories) do
+	pendingLevels[category] = 0
+end
+
+local camera = workspace.CurrentCamera
+local savedCameraType
+
+-- Local-only scene state
+local sceneFolder -- Folder holding the display clone + bus (client-only)
+local displayCharacter
+local displayBus
+local layout
+
+local function setRowsInteractable(enabled)
+	gui.confirmButton.Active = enabled
+	gui.confirmButton.AutoButtonColor = enabled
+	for _, row in pairs(gui.rows) do
+		row.minus.Active = enabled
+		row.plus.Active = enabled
+	end
+end
+
+local function refreshLevelLabel(category)
+	local row = gui.rows[category]
+	if row then
+		row.levelLabel.Text = pendingLevels[category] .. " / " .. UpgradeConfig.MaxLevel
+	end
+end
+
+>>>>>>> 5ebfa8a40e59ed118b29d72e4a85019bc0f8a642
 local function freezeRealCharacter(frozen)
 	local character = player.Character
 	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
@@ -176,6 +232,7 @@ local function freezeRealCharacter(frozen)
 		return
 	end
 	if frozen then
+<<<<<<< HEAD
 		if not savedMovement then
 			savedMovement = {
 				humanoid = humanoid,
@@ -211,21 +268,40 @@ local function setDisplayBus(chassisId, levels)
 end
 
 local function buildScene(garageState)
+=======
+		humanoid.WalkSpeed = 0
+		humanoid.JumpPower = 0
+	else
+		humanoid.WalkSpeed = 16
+		humanoid.JumpPower = 50
+	end
+end
+
+local function buildScene(confirmedState)
+>>>>>>> 5ebfa8a40e59ed118b29d72e4a85019bc0f8a642
 	sceneFolder = Instance.new("Folder")
 	sceneFolder.Name = "LocalGarageScene"
 	sceneFolder.Parent = workspace
 
+<<<<<<< HEAD
 	layout = GarageLayout.Compute(GarageLayout.GetAnchorCFrame())
 
 	-- Local-only clone of your own avatar -- never replicates anywhere.
 	-- Characters are Archivable=false by default, so :Clone() returns nil
 	-- unless we flip it on first.
+=======
+	local anchorCFrame = GarageLayout.GetAnchorCFrame()
+	layout = GarageLayout.Compute(anchorCFrame)
+
+		-- Local-only clone of your own avatar -- never replicates anywhere.
+>>>>>>> 5ebfa8a40e59ed118b29d72e4a85019bc0f8a642
 	local realCharacter = player.Character
 	if realCharacter then
 		local wasArchivable = realCharacter.Archivable
 		realCharacter.Archivable = true
 		displayCharacter = realCharacter:Clone()
 		realCharacter.Archivable = wasArchivable
+<<<<<<< HEAD
 	end
 
 	if displayCharacter then
@@ -239,37 +315,75 @@ local function buildScene(garageState)
 				item:Destroy()
 			end
 		end
+=======
+
+		displayCharacter.Name = "GarageDisplayAvatar"
+>>>>>>> 5ebfa8a40e59ed118b29d72e4a85019bc0f8a642
 		local hrp = displayCharacter:FindFirstChild("HumanoidRootPart")
 		if hrp then
 			hrp.Anchored = true
 		end
+<<<<<<< HEAD
+=======
+		for _, part in ipairs(displayCharacter:GetDescendants()) do
+			if part:IsA("BasePart") then
+				part.CanCollide = false
+				part.CanQuery = false
+			end
+		end
+>>>>>>> 5ebfa8a40e59ed118b29d72e4a85019bc0f8a642
 		displayCharacter:PivotTo(layout.player)
 		displayCharacter.Parent = sceneFolder
 	end
 
+<<<<<<< HEAD
 	setDisplayBus(garageState.chassisId, garageState.confirmed)
+=======
+	displayBus = BusBuilder.BuildBaseBus(UpgradeConfig.DefaultChassisId)
+	displayBus:PivotTo(layout.bus)
+	BusUpgradeApplier.ApplyState(displayBus, confirmedState)
+	displayBus.Parent = sceneFolder
+>>>>>>> 5ebfa8a40e59ed118b29d72e4a85019bc0f8a642
 end
 
 local function destroyScene()
 	if sceneFolder then
 		sceneFolder:Destroy()
+<<<<<<< HEAD
 	end
 	sceneFolder = nil
 	displayCharacter = nil
 	displayBus = nil
 	displayedChassisId = nil
+=======
+		sceneFolder = nil
+	end
+	displayCharacter = nil
+	displayBus = nil
+>>>>>>> 5ebfa8a40e59ed118b29d72e4a85019bc0f8a642
 end
 
 local function enterGarageCamera(cameraCFrame)
 	savedCameraType = camera.CameraType
 	camera.CameraType = Enum.CameraType.Scriptable
+<<<<<<< HEAD
 	TweenService:Create(camera, TweenInfo.new(0.8, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
 		CFrame = cameraCFrame,
 	}):Play()
+=======
+
+	local tween = TweenService:Create(
+		camera,
+		TweenInfo.new(0.8, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+		{ CFrame = cameraCFrame }
+	)
+	tween:Play()
+>>>>>>> 5ebfa8a40e59ed118b29d72e4a85019bc0f8a642
 end
 
 local function exitGarageCamera()
 	camera.CameraType = savedCameraType or Enum.CameraType.Custom
+<<<<<<< HEAD
 	savedCameraType = nil
 end
 
@@ -304,10 +418,18 @@ gui.openButton.MouseButton1Click:Connect(function()
 		return
 	end
 	openRequested = true
+=======
+end
+
+-- Open / close --------------------------------------------------------------
+
+gui.openButton.MouseButton1Click:Connect(function()
+>>>>>>> 5ebfa8a40e59ed118b29d72e4a85019bc0f8a642
 	OpenGarage:FireServer()
 end)
 
 gui.closeButton.MouseButton1Click:Connect(function()
+<<<<<<< HEAD
 	CloseGarage:FireServer()
 	closeLocal()
 	refreshOpenButton()
@@ -472,3 +594,70 @@ UpgradesConfirmed.OnClientEvent:Connect(function(garageState)
 	swapping = false
 	render()
 end)
+=======
+	gui.panel.Visible = false
+	destroyScene()
+	exitGarageCamera()
+	freezeRealCharacter(false)
+end)
+
+GarageReady.OnClientEvent:Connect(function(confirmedState)
+	for category, level in pairs(confirmedState) do
+		pendingLevels[category] = level
+		refreshLevelLabel(category)
+	end
+
+	buildScene(confirmedState)
+	freezeRealCharacter(true)
+	gui.panel.Visible = true
+	setRowsInteractable(true)
+	enterGarageCamera(layout.camera)
+end)
+
+-- +/- buttons -----------------------------------------------------------------
+
+for category, row in pairs(gui.rows) do
+	row.minus.MouseButton1Click:Connect(function()
+		local newLevel = math.max(UpgradeConfig.MinLevel, pendingLevels[category] - 1)
+		if newLevel == pendingLevels[category] then
+			return
+		end
+		RequestSetLevel:FireServer(category, newLevel)
+	end)
+
+	row.plus.MouseButton1Click:Connect(function()
+		local newLevel = math.min(UpgradeConfig.MaxLevel, pendingLevels[category] + 1)
+		if newLevel == pendingLevels[category] then
+			return
+		end
+		RequestSetLevel:FireServer(category, newLevel)
+	end)
+end
+
+PendingLevelUpdated.OnClientEvent:Connect(function(category, level)
+	pendingLevels[category] = level
+	refreshLevelLabel(category)
+end)
+
+-- Confirm -----------------------------------------------------------------
+
+gui.confirmButton.MouseButton1Click:Connect(function()
+	setRowsInteractable(false)
+	RequestConfirm:FireServer()
+end)
+
+UpgradesConfirmed.OnClientEvent:Connect(function(confirmedState)
+	for category, level in pairs(confirmedState) do
+		pendingLevels[category] = level
+	end
+
+	if displayCharacter and displayBus and layout then
+		GarageSwapSequence.Play(displayCharacter, displayBus, layout.player, layout.behind, confirmedState)
+	end
+
+	for category in pairs(confirmedState) do
+		refreshLevelLabel(category)
+	end
+	setRowsInteractable(true)
+end)
+>>>>>>> 5ebfa8a40e59ed118b29d72e4a85019bc0f8a642

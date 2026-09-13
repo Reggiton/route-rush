@@ -1,6 +1,7 @@
 --[[
 	BusBuilder.lua
 
+<<<<<<< HEAD
 	Builds a bus model for a chassis tier, with one Attachment per upgrade
 	category so BusUpgradeApplier knows where to weld each upgrade.
 
@@ -19,12 +20,28 @@
 
 	Convention: the bus faces Root's LookVector (-Z). Visual parts are
 	welded, massless, and non-colliding; only Root collides.
+=======
+	Builds a bus model with one Attachment per upgrade category, so
+	BusUpgradeApplier knows where to weld each upgrade's model.
+
+	RIGHT NOW: the "bus" is a single placeholder block, per the brief.
+
+	LATER: replace the body of BuildBaseBus() with code that clones a
+	real bus asset for the given chassisId (e.g. from
+	ReplicatedStorage.GarageAssets.Chassis[chassisId].BusTemplate).
+	The only requirement is that the returned model still has:
+	  - a PrimaryPart
+	  - one Attachment per UpgradeConfig.Categories entry, parented to
+	    the PrimaryPart (or wherever you want upgrades to weld to)
+	Nothing else in the codebase needs to change.
+>>>>>>> 5ebfa8a40e59ed118b29d72e4a85019bc0f8a642
 ]]
 
 local UpgradeConfig = require(script.Parent.Parent.Config.UpgradeConfig)
 
 local BusBuilder = {}
 
+<<<<<<< HEAD
 local WINDOW_COLOR = Color3.fromRGB(35, 45, 55)
 local WHEEL_COLOR = Color3.fromRGB(25, 25, 25)
 local ROOF_COLOR = Color3.fromRGB(220, 220, 220)
@@ -206,11 +223,36 @@ function BusBuilder.BuildBaseBus(chassisId, opts)
 		weld.Part0 = root
 		weld.Part1 = seat
 		weld.Parent = seat
+=======
+function BusBuilder.BuildBaseBus(chassisId)
+	chassisId = chassisId or UpgradeConfig.DefaultChassisId
+
+	local bus = Instance.new("Model")
+	bus.Name = "Bus_" .. chassisId
+
+	local body = Instance.new("Part")
+	body.Name = "Body"
+	body.Size = Vector3.new(8, 6, 20)
+	body.Color = Color3.fromRGB(255, 200, 0)
+	body.Anchored = true
+	body.CanCollide = true
+	body.Parent = bus
+	bus.PrimaryPart = body
+
+	-- One attachment per category, spaced along the roof so placeholder
+	-- blocks don't overlap. Positions are purely cosmetic for now.
+	for i, category in ipairs(UpgradeConfig.Categories) do
+		local attachment = Instance.new("Attachment")
+		attachment.Name = category
+		attachment.Position = Vector3.new(0, 3.5, -8 + (i - 1) * 4)
+		attachment.Parent = body
+>>>>>>> 5ebfa8a40e59ed118b29d72e4a85019bc0f8a642
 	end
 
 	return bus
 end
 
+<<<<<<< HEAD
 -- Anchors or unanchors every part of a built bus.
 function BusBuilder.SetAnchored(bus, anchored)
 	for _, part in ipairs(bus:GetDescendants()) do
@@ -220,4 +262,6 @@ function BusBuilder.SetAnchored(bus, anchored)
 	end
 end
 
+=======
+>>>>>>> 5ebfa8a40e59ed118b29d72e4a85019bc0f8a642
 return BusBuilder
