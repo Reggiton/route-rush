@@ -25,6 +25,7 @@ local BusUpgradeApplier = require(GarageSystem.Modules.BusUpgradeApplier)
 local GarageLayout = require(GarageSystem.Modules.GarageLayout)
 local UpgradeCatalog = require(GarageSystem.Config.UpgradeCatalog)
 local BusStats = require(Shared.Modules.BusStats)
+local Restoration = require(Shared.Modules.Restoration)
 local GarageGuiBuilder = require(script.Parent.GarageGuiBuilder)
 local GarageSwapSequence = require(script.Parent.GarageSwapSequence)
 
@@ -104,7 +105,14 @@ local function render()
 
 	gui.chassisName.Text = string.format("Tier %d · %s", state.tierIndex, state.displayName)
 	if state.owned then
-		gui.chassisSub.Text = state.selected and "Owned · Driving this bus" or "Owned"
+		local fraction = Restoration.Fraction(state.chassisId, state.pending)
+		local bonus = Restoration.FareMultiplier(state.chassisId, state.pending) - 1
+		gui.chassisSub.Text = string.format(
+			"%s · %d%% restored (+%d%% fares)",
+			state.selected and "Driving this bus" or "Owned",
+			math.floor(fraction * 100 + 0.5),
+			math.floor(bonus * 100 + 0.5)
+		)
 	else
 		gui.chassisSub.Text = string.format("Locked · Level %d · %s", state.requiredLevel, formatCash(state.price))
 	end

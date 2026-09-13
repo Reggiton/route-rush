@@ -52,11 +52,16 @@ DrivingConfig.Controller = {
 
 -- Server-side collision & sanity --------------------------------------------------
 DrivingConfig.Collision = {
-	SampleInterval = 0.1, -- seconds between velocity samples
-	ImpactMinDrop = 14, -- studs/s drop in one sample (beyond braking) to count
-	BrakeSlack = 1.6, -- allowed drop = brakeDecel * interval * BrakeSlack
-	DamagePerStudPerSecond = 1.5, -- damage per studs/s of excess drop
-	ImpactCooldown = 0.6, -- seconds before another impact can register
+	SampleInterval = 0.1, -- seconds between position samples
+	HistorySeconds = 0.8, -- how much position history to keep
+	RecentWindow = 0.2, -- "speed now" is measured over this many seconds...
+	BeforeWindow = 0.3, -- ...and compared with the speed over this window before it
+	ImpactMinSpeed = 18, -- ignore slowdowns that start below this speed (studs/s)
+	ImpactMinDrop = 16, -- studs/s of slowdown beyond what the brakes explain
+	BrakeSlack = 1.5, -- allowed slowdown = brakeDecel * window * BrakeSlack
+	ContactMargin = 1.5, -- studs around the bus checked for something solid
+	DamagePerStudPerSecond = 0.9, -- damage per studs/s of excess slowdown
+	ImpactCooldown = 0.8, -- seconds before another impact can register
 	BreakdownSeconds = 5,
 	BreakdownPassengerLoss = 0.25, -- fraction of onboard passengers lost
 	BreakdownRepairFraction = 0.5, -- health restored after a breakdown

@@ -199,6 +199,8 @@ StopEvent.OnClientEvent:Connect(function(event)
 		)
 	elseif event.kind == "boarded" then
 		showToast(string.format("%d passenger%s boarded", event.count, event.count == 1 and "" or "s"))
+	elseif event.kind == "impact" then
+		showToast(string.format("Hit %s  −%d HP", tostring(event.what), event.damage), Color3.fromRGB(240, 160, 90))
 	elseif event.kind == "lost" then
 		showToast(string.format("Breakdown! %d passenger%s walked off", event.count, event.count == 1 and "" or "s"), Color3.fromRGB(240, 120, 100))
 	end

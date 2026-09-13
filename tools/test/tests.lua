@@ -114,16 +114,17 @@ eq("rep halves with no on-time", dirty.reputation, 10)
 eq("empty run rep", Progression.RunPayout({ durationSeconds = 300 }).reputation, 0)
 
 -- Bus stats
+local tier1 = UpgradeConfig.GetChassis("Tier1").baseStats
 local base = BusStats.Compute("Tier1", levels(), 0)
-eq("base top speed", base.topSpeed, 70)
-eq("base capacity", base.capacity, 8)
-eq("handles 9 doubles capacity", BusStats.Compute("Tier1", levels({ Handles = 9 }), 0).capacity, 16)
-local full = BusStats.Compute("Tier1", levels(), 8)
-check("full load slower", math.abs(full.topSpeed - 70 * 0.85) < 1e-6, full.topSpeed)
-check("full load grip penalty", math.abs(full.grip - 60 * 0.6) < 1e-6, full.grip)
-eq("passengers clamped", BusStats.Compute("Tier1", levels(), 999).passengers, 8)
-local handled = BusStats.Compute("Tier1", levels({ Handles = 9 }), 16)
-check("handles softens load grip penalty", handled.grip / (60 * 1.36) > full.grip / 60, handled.grip)
+eq("base top speed", base.topSpeed, tier1.topSpeed)
+eq("base capacity", base.capacity, tier1.capacity)
+eq("handles 9 doubles capacity", BusStats.Compute("Tier1", levels({ Handles = 9 }), 0).capacity, tier1.capacity * 2)
+local full = BusStats.Compute("Tier1", levels(), tier1.capacity)
+check("full load slower", math.abs(full.topSpeed - tier1.topSpeed * 0.85) < 1e-6, full.topSpeed)
+check("full load grip penalty", math.abs(full.grip - tier1.grip * 0.6) < 1e-6, full.grip)
+eq("passengers clamped", BusStats.Compute("Tier1", levels(), 999).passengers, tier1.capacity)
+local handled = BusStats.Compute("Tier1", levels({ Handles = 9 }), tier1.capacity * 2)
+check("handles softens load grip penalty", handled.grip / (tier1.grip * 1.36) > full.grip / tier1.grip, handled.grip)
 check("health reduces damage", BusStats.Compute("Tier1", levels({ Health = 9 }), 0).damageMult < 1)
 eq("unknown chassis falls back", BusStats.Compute("Nope", levels(), 0).capacity, 8)
 
@@ -166,6 +167,38 @@ end
 eq("catalog has all 180 upgrades", catalogCount, 180)
 eq("catalog sample name", UpgradeCatalog.Get("Tier1", "Engine", 4).name, "Bazaar Turbo Kit")
 eq("catalog level 0 is nil", UpgradeCatalog.Get("Tier1", "Engine", 0), nil)
+
+-- Restoration (rusted -> pristine)
+local Restoration = require(RS.Shared.Modules.Restoration)
+local RestorationConfig = require(RS.GarageSystem.Config.RestorationConfig)
+eq("fresh bus fully rusted", Restoration.Fraction("Tier1", levels()), 0)
+eq("maxed bus fully restored", Restoration.Fraction("Tier1", allLevels(9)), 1)
+eq("fresh fare multiplier", Restoration.FareMultiplier("Tier1", levels()), 1)
+eq("maxed fare multiplier", Restoration.FareMultiplier("Tier1", allLevels(9)), 1 + RestorationConfig.MaxFareBonus)
+local previousFraction = -1
+for lv = 0, 9 do
+	local fraction = Restoration.Fraction("Tier1", allLevels(lv))
+	check("restoration never goes backwards at lv" .. lv, fraction >= previousFraction, fraction)
+	previousFraction = fraction
+end
+check("one upgrade restores only part of the bus", Restoration.Fraction("Tier1", levels({ Engine = 9 })) < 1)
+eq("low part -> wheels region", Restoration.RegionFor("Tier1", 0.5, 0.1, 0.5).category, "Brakes")
+eq("high part -> roof region", Restoration.RegionFor("Tier1", 0.5, 0.95, 0.5).category, "Handles")
+eq("front part -> engine region", Restoration.RegionFor("Tier1", 0.5, 0.5, 0.05).category, "Engine")
+eq("rear part -> rear region", Restoration.RegionFor("Tier1", 0.5, 0.5, 0.95).category, "Accel")
+eq("middle part -> body panels", Restoration.RegionFor("Tier1", 0.5, 0.5, 0.5).category, "Health")
+eq("out-of-range point clamps", Restoration.RegionFor("Tier1", 2, -1, 0.5).category, "Brakes")
+for _, region in ipairs(RestorationConfig.Regions) do
+	local first = region.levels[1]
+	local last = region.levels[#region.levels]
+	local lowT = Restoration.ThresholdFor(region, 0, 0, 0)
+	local highT = Restoration.ThresholdFor(region, 1, 1, 1)
+	check(region.name .. " thresholds come from its levels list", (lowT == first or lowT == last) and (highT == first or highT == last))
+end
+eq("empty levels never restore", Restoration.ThresholdFor({ levels = {} }, 0.5, 0.5, 0.5), math.huge)
+eq("single level region", Restoration.ThresholdFor({ levels = { 4 } }, 0.9, 0.9, 0.9), 4)
+eq("two-slice sweep front", Restoration.ThresholdFor({ levels = { 2, 8 }, sweep = "FrontToBack" }, 0.5, 0.5, 0.1), 2)
+eq("two-slice sweep back", Restoration.ThresholdFor({ levels = { 2, 8 }, sweep = "FrontToBack" }, 0.5, 0.5, 0.9), 8)
 
 print(string.format("%d passed, %d failed", passes, failures))
 if failures > 0 then

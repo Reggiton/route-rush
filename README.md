@@ -167,16 +167,50 @@ tunable number lives in a Config file.**
 
 ## Using your bus models
 
-`BusBuilder` uses a real model for any tier that has one and a block
+`BusBuilder` uses real models for any tier that has them and a block
 placeholder for tiers that don't. It works for both the garage and the
 drivable bus.
 
-1. In Studio, rename each bus Model to its tier: `Tier1`, `Tier2`, `Tier3`, `Tier4`.
-2. Drag it into **ReplicatedStorage → GarageAssets → Buses**. This folder is
-   set to `ignoreUnknownInstances`, so Rojo won't delete what you put there.
-3. **Share it with the team:** right-click the model → *Save to File…* →
-   save as `src/ReplicatedStorage/GarageAssets/Buses/Tier1.rbxm` (etc.) and
-   commit it. Rojo then syncs it into everyone's Studio.
+### Rusted → pristine buses (two models per tier)
+
+1. In Studio, create a **Folder** named after the tier (`Tier1` … `Tier4`)
+   inside **ReplicatedStorage → GarageAssets → Buses**. This folder is set to
+   `ignoreUnknownInstances`, so Rojo won't delete what you put there.
+2. Put the two models inside it, named exactly **`Rusted`** and **`Pristine`**:
+   ```
+   ReplicatedStorage/GarageAssets/Buses/Tier1/
+     Rusted     (Model)
+     Pristine   (Model)
+   ```
+   They don't need to be in the same spot; each is centered automatically
+   and their wheel bottoms are lined up. They should be the same size and
+   face the same way.
+3. **Share it with the team:** right-click the `Tier1` folder → *Save to File…* →
+   save as `src/ReplicatedStorage/GarageAssets/Buses/Tier1.rbxm` and commit it.
+
+As upgrades level up, parts of the rusted bus are swapped for the matching
+parts of the pristine one. **Which upgrade restores which area, and at which
+levels, is set in `GarageSystem/Config/RestorationConfig.lua`:**
+
+| Upgrade | Area it restores (default) | Levels (default) |
+|---|---|---|
+| Brakes | wheels & undercarriage | 1, 3, 5, 7, 9 |
+| Handles | roof | 1, 3, 5, 7, 9 |
+| Engine | front & engine | 1, 3, 5, 7, 9 |
+| Accel | rear | 1, 3, 5, 7, 9 |
+| Health | body panels | every level |
+
+Each number in `levels` unrusts the next slice of that area, so `{ 2, 5, 9 }`
+means three slices at levels 2, 5 and 9. To hand-pick instead, set
+`RestoreLevel` (number) and optionally `RestoreCategory` (e.g. `"Engine"`)
+attributes on a part, or on a Model/Folder grouping parts, **in both**
+models. A more restored bus also earns higher fares: up to
+`MaxFareBonus` (+25%) when fully pristine.
+
+### A single model per tier
+
+Put one Model named `Tier1` (etc.) straight into `GarageAssets/Buses`. It's
+always shown as-is, with the placeholder upgrade blocks attached.
 
 The model doesn't need any setup: it's centered, fitted with an invisible
 collision box, welded, and made non-colliding automatically, and scripts

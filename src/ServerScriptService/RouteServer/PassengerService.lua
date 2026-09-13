@@ -21,6 +21,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local RouteConfig = require(ReplicatedStorage.Shared.Config.RouteConfig)
 local Progression = require(ReplicatedStorage.Shared.Modules.Progression)
+local Restoration = require(ReplicatedStorage.Shared.Modules.Restoration)
 local BusSpawner = require(script.Parent.BusSpawner)
 local TrackBuilder = require(script.Parent.TrackBuilder)
 local RunScoring = require(script.Parent.RunScoring)
@@ -137,11 +138,13 @@ local function deliverAt(player, record, stopIndex)
 
 	local now = os.clock()
 	local delivered, onTimeCount, earned = 0, 0, 0
+	-- A more restored (less rusty) bus earns higher fares.
+	local fareMultiplier = Restoration.FareMultiplier(record.chassisId, record.levels)
 	for i = #list, 1, -1 do
 		local passenger = list[i]
 		if passenger.destination == stopIndex then
 			table.remove(list, i)
-			local fare = Progression.Fare(passenger.stopsTravelled)
+			local fare = math.floor(Progression.Fare(passenger.stopsTravelled) * fareMultiplier + 0.5)
 			local onTime = now <= passenger.deadline
 			if onTime then
 				fare = fare + Progression.OnTimeBonus(fare)

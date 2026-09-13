@@ -4,22 +4,31 @@
 	Builds a bus model for a chassis tier, with one Attachment per upgrade
 	category so BusUpgradeApplier knows where to weld each upgrade.
 
-	REAL MODELS: if ReplicatedStorage.GarageAssets.Buses has a Model named
-	after the chassis id ("Tier1", "Tier2", ...), that model is used. It
-	can be any bus model built in Studio -- this file wraps it:
-	  - centers it, turns it to face -Z, and fits an invisible collision
-	    box ("Root") around it
-	  - makes every part welded, massless, and non-colliding
-	  - removes scripts, disables seats/constraints inside it
-	Optional attributes on the template Model:
+	REAL MODELS live in ReplicatedStorage.GarageAssets.Buses, named after
+	the chassis id ("Tier1", "Tier2", ...). Two layouts are supported:
+
+	  Tier1 (Folder or Model)          rusted -> pristine (recommended)
+	    Rusted   (Model)               the fully rusted bus
+	    Pristine (Model)               the fully restored bus
+	  Both are built into the bus, overlaid; BusRestoration swaps parts
+	  from rusted to pristine as upgrades level up (RestorationConfig.lua).
+
+	  Tier1 (Model)                    a single model, always shown as-is
+
+	Either way the model(s) are wrapped automatically:
+	  - centered, bottoms lined up, turned to face -Z, and fitted with an
+	    invisible collision box ("Root")
+	  - every part welded, massless, and non-colliding
+	  - scripts removed, seats/constraints inside disabled
+	Optional attributes on the Tier folder/model (or on Rusted):
 	  FrontAxis   "-Z" (default) | "+Z" | "+X" | "-X": which way the bus's
 	              front points in the model as built
 	  Scale       number, default 1
 	  RideHeight  studs of wheel clearance under the collision box
 	              (default 15% of the model's height)
-	Optional children anywhere inside the template:
+	Optional children anywhere inside the model(s):
 	  Attachments named Engine / Accel / Brakes / Handles / Health
-	  -> where upgrade models attach (otherwise placed automatically)
+	  -> where upgrade blocks attach (otherwise placed automatically)
 	  A Seat named "DriverSeat" -> where the driver sits
 
 	PLACEHOLDERS: tiers without a model get a block bus built from parts,
@@ -28,7 +37,8 @@
 	Every returned bus has:
 	  - PrimaryPart = invisible collision box named "Root"
 	  - one Attachment per UpgradeConfig.Categories entry, parented to Root
-	  - attributes ChassisId, RootHeight (ground -> Root center), BusLength
+	  - attributes ChassisId, RootHeight (ground -> Root center), BusLength,
+	    HasRestoration (true when built from Rusted + Pristine)
 	  - (opts.withSeat) a Seat named "DriverSeat" welded to Root
 	Convention: the bus faces Root's LookVector (-Z).
 ]]
@@ -36,6 +46,7 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local UpgradeConfig = require(script.Parent.Parent.Config.UpgradeConfig)
+local BusRestoration = require(script.Parent.BusRestoration)
 
 local BusBuilder = {}
 
@@ -147,6 +158,28 @@ function BusBuilder.GetTemplate(chassisId)
 	return nil
 end
 
+-- Returns rusted, pristine sources if the template holds both variants.
+function BusBuilder.GetVariants(template)
+	local rusted = template:FindFirstChild("Rusted")
+	local pristine = template:FindFirstChild("Pristine")
+	local function usable(item)
+		return item and (item:IsA("Model") or item:IsA("Folder"))
+	end
+	if usable(rusted) and usable(pristine) then
+		return rusted, pristine
+	end
+	return nil, nil
+end
+
+local function settingFrom(template, name)
+	local value = template:GetAttribute(name)
+	if value == nil then
+		local rusted = template:FindFirstChild("Rusted")
+		value = rusted and rusted:GetAttribute(name)
+	end
+	return value
+end
+
 -- World-axis bounding box of the visible parts (falls back to all parts).
 local function worldBounds(model)
 	local function measure(visibleOnly)
@@ -177,8 +210,10 @@ local function worldBounds(model)
 	return (minV + maxV) / 2, maxV - minV
 end
 
-local function buildFromTemplate(template, tier, opts, anchored)
-	local body = template:Clone()
+-- Clones a source model, scales it, centers it on the origin and turns its front to -Z.
+-- Returns (model, size) or nil.
+local function prepareBody(source, degrees, scale)
+	local body = source:Clone()
 	if not body:IsA("Model") then
 		local model = Instance.new("Model")
 		for _, child in ipairs(body:GetChildren()) do
@@ -187,10 +222,8 @@ local function buildFromTemplate(template, tier, opts, anchored)
 		body:Destroy()
 		body = model
 	end
-	body.Name = "Body"
 
-	local scale = template:GetAttribute("Scale")
-	if type(scale) == "number" and scale > 0 and scale ~= 1 then
+	if scale ~= 1 then
 		pcall(function()
 			body:ScaleTo(body:GetScale() * scale)
 		end)
@@ -202,15 +235,51 @@ local function buildFromTemplate(template, tier, opts, anchored)
 		return nil
 	end
 
-	-- Center on the origin and turn the front to -Z.
-	local degrees = FRONT_AXIS_DEGREES[template:GetAttribute("FrontAxis") or "-Z"] or 0
 	body:PivotTo(CFrame.Angles(0, math.rad(degrees), 0) * CFrame.new(-center) * body:GetPivot())
 	if degrees == 90 or degrees == -90 then
 		size = Vector3.new(size.Z, size.Y, size.X)
 	end
+	return body, size
+end
+
+local function buildFromTemplate(template, tier, opts, anchored)
+	local degrees = FRONT_AXIS_DEGREES[settingFrom(template, "FrontAxis") or "-Z"] or 0
+	local scale = settingFrom(template, "Scale")
+	scale = (type(scale) == "number" and scale > 0) and scale or 1
+
+	local bodies = {} -- { model, variant }
+	local size
+	local rustedSource, pristineSource = BusBuilder.GetVariants(template)
+	if rustedSource then
+		local rusted, rustedSize = prepareBody(rustedSource, degrees, scale)
+		local pristine, pristineSize = prepareBody(pristineSource, degrees, scale)
+		if not rusted or not pristine then
+			if rusted then
+				rusted:Destroy()
+			end
+			if pristine then
+				pristine:Destroy()
+			end
+			return nil
+		end
+		-- Both are centered; line up the bottoms of the wheels.
+		pristine:PivotTo(CFrame.new(0, (pristineSize.Y - rustedSize.Y) / 2, 0) * pristine:GetPivot())
+		rusted.Name = "BodyRusted"
+		pristine.Name = "BodyPristine"
+		bodies = { { model = rusted, variant = "Rusted" }, { model = pristine, variant = "Pristine" } }
+		size = rustedSize
+	else
+		local body, bodySize = prepareBody(template, degrees, scale)
+		if not body then
+			return nil
+		end
+		body.Name = "Body"
+		bodies = { { model = body } }
+		size = bodySize
+	end
 
 	local width, height, length = size.X, size.Y, size.Z
-	local rideHeight = template:GetAttribute("RideHeight")
+	local rideHeight = settingFrom(template, "RideHeight")
 	rideHeight = math.clamp(type(rideHeight) == "number" and rideHeight or height * 0.15, 0, height * 0.5)
 	local rootHeight = height - rideHeight
 
@@ -219,37 +288,47 @@ local function buildFromTemplate(template, tier, opts, anchored)
 	bus:SetAttribute("ChassisId", tier.id)
 	bus:SetAttribute("RootHeight", rideHeight + rootHeight / 2)
 	bus:SetAttribute("BusLength", length)
+	bus:SetAttribute("HasRestoration", #bodies == 2)
 
 	-- Model space: bottom of the wheels at y = -height/2.
 	local root = makeRoot(bus, Vector3.new(width, rootHeight, length), CFrame.new(0, rideHeight / 2, 0), anchored)
+	local boxMin = Vector3.new(-width / 2, -height / 2, -length / 2)
 
 	local markers = {}
-	for _, item in ipairs(body:GetDescendants()) do
-		if item:IsA("LuaSourceContainer") then
-			item:Destroy()
-		elseif item:IsA("Seat") or item:IsA("VehicleSeat") then
-			if item.Name == "DriverSeat" or (item:IsA("VehicleSeat") and not markers.seat) then
-				markers.seat = item.CFrame
+	for _, entry in ipairs(bodies) do
+		local body = entry.model
+		for _, item in ipairs(body:GetDescendants()) do
+			if item:IsA("LuaSourceContainer") then
+				item:Destroy()
+			elseif item:IsA("Seat") or item:IsA("VehicleSeat") then
+				if item.Name == "DriverSeat" or (item:IsA("VehicleSeat") and not markers.seat) then
+					markers.seat = markers.seat or item.CFrame
+				end
+				item.Disabled = true
+			elseif item:IsA("Attachment") and table.find(UpgradeConfig.Categories, item.Name) then
+				markers[item.Name] = markers[item.Name] or item.WorldPosition
+				item.Name = item.Name .. "_Marker"
+			elseif item:IsA("Constraint") then
+				item.Enabled = false
 			end
-			item.Disabled = true
-		elseif item:IsA("Attachment") and table.find(UpgradeConfig.Categories, item.Name) then
-			markers[item.Name] = item.WorldPosition
-			item.Name = item.Name .. "_Marker"
-		elseif item:IsA("Constraint") then
-			item.Enabled = false
 		end
-	end
-	for _, part in ipairs(body:GetDescendants()) do
-		if part:IsA("BasePart") then
-			part.Anchored = anchored
-			part.CanCollide = false
-			part.CanTouch = false
-			part.CanQuery = false
-			part.Massless = true
-			weldToRoot(root, part)
+
+		if entry.variant then
+			BusRestoration.Tag(tier.id, body, entry.variant, boxMin, size)
 		end
+
+		for _, part in ipairs(body:GetDescendants()) do
+			if part:IsA("BasePart") then
+				part.Anchored = anchored
+				part.CanCollide = false
+				part.CanTouch = false
+				part.CanQuery = false
+				part.Massless = true
+				weldToRoot(root, part)
+			end
+		end
+		body.Parent = bus
 	end
-	body.Parent = bus
 
 	local bottomY = -rootHeight / 2
 	finishBus(bus, root, {
@@ -261,6 +340,9 @@ local function buildFromTemplate(template, tier, opts, anchored)
 		wheelY = bottomY - rideHeight / 2,
 		frontZ = -length / 2 + length * 0.18,
 	}, markers, opts)
+
+	-- Start fully rusted; BusUpgradeApplier.ApplyState restores from the real levels.
+	BusRestoration.Apply(bus, {})
 
 	return bus
 end
@@ -280,6 +362,7 @@ local function buildPlaceholder(tier, opts, anchored)
 	bus:SetAttribute("ChassisId", tier.id)
 	bus:SetAttribute("RootHeight", rideHeight + bodyHeight / 2)
 	bus:SetAttribute("BusLength", length)
+	bus:SetAttribute("HasRestoration", false)
 
 	-- Collision root: the body volume, floating rideHeight above the ground.
 	local root = makeRoot(bus, Vector3.new(width, bodyHeight, length), CFrame.new(), anchored)
