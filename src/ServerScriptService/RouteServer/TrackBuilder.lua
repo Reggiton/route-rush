@@ -116,52 +116,54 @@ local function addStopMarker(track, index, position)
 	return marker
 end
 
--- A glowing ring on the road marking a stop's boarding area, plus a faint light column.
-local function addStopRing(parent, groundCFrame)
-	local radius = RouteConfig.StopRadius
-	local segments = RouteConfig.StopRingSegments
-	local center = groundCFrame.Position
-	local segmentLength = 2 * math.pi * radius / segments * 1.08
+-- A glowing rectangular bay on the road marking a stop's boarding area:
+-- a painted outline, a faint fill, and low light walls along its sides.
+-- bayCFrame: ground-level center of the bay, facing the driving direction.
+local function addStopBay(parent, bayCFrame)
+	local width = RouteConfig.StopBayWidth
+	local length = RouteConfig.StopBayLength
+	local height = RouteConfig.StopGlowHeight
+	local line = 0.6
 
-	local ring = Instance.new("Model")
-	ring.Name = "Ring"
-	ring.Parent = parent
+	local bay = Instance.new("Model")
+	bay.Name = "Bay"
+	bay.Parent = parent
 
-	local glowProps = {
-		Color = RING_COLOR,
-		Material = Enum.Material.Neon,
-		CanCollide = false,
-		CanQuery = false,
-		CanTouch = false,
-		CastShadow = false,
-	}
-	for i = 0, segments - 1 do
-		local angle = i / segments * math.pi * 2
-		local point = center + Vector3.new(math.cos(angle) * radius, 0.35, math.sin(angle) * radius)
-		local tangent = Vector3.new(-math.sin(angle), 0, math.cos(angle))
-		makePart(ring, "RingSegment", Vector3.new(0.9, 0.3, segmentLength), CFrame.lookAt(point, point + tangent), glowProps)
+	local function glow(name, size, offset, transparency)
+		local part = makePart(bay, name, size, bayCFrame * offset, {
+			Color = RING_COLOR,
+			Material = Enum.Material.Neon,
+			CanCollide = false,
+			CanQuery = false,
+			CanTouch = false,
+			CastShadow = false,
+		})
+		part.Transparency = transparency or 0
+		return part
 	end
 
-	if RouteConfig.StopColumnHeight > 0 then
-		local height = RouteConfig.StopColumnHeight
-		local column = makePart(
-			ring,
-			"LightColumn",
-			Vector3.new(height, radius * 2, radius * 2),
-			CFrame.new(center + Vector3.new(0, height / 2, 0)) * CFrame.Angles(0, 0, math.rad(90)),
-			glowProps
-		)
-		column.Shape = Enum.PartType.Cylinder
-		column.Transparency = 0.94
+	-- Outline
+	glow("EdgeLeft", Vector3.new(line, 0.2, length), CFrame.new(-width / 2, 0.12, 0))
+	glow("EdgeRight", Vector3.new(line, 0.2, length), CFrame.new(width / 2, 0.12, 0))
+	glow("EdgeFront", Vector3.new(width + line, 0.2, line), CFrame.new(0, 0.12, -length / 2))
+	glow("EdgeBack", Vector3.new(width + line, 0.2, line), CFrame.new(0, 0.12, length / 2))
 
-		local light = Instance.new("PointLight")
-		light.Color = RING_COLOR
-		light.Range = radius * 1.5
-		light.Brightness = 1.5
-		light.Parent = column
+	-- Faint fill + light
+	local fill = glow("Fill", Vector3.new(width, 0.1, length), CFrame.new(0, 0.06, 0), 0.86)
+	local light = Instance.new("PointLight")
+	light.Color = RING_COLOR
+	light.Range = length * 0.6
+	light.Brightness = 1.2
+	light.Parent = fill
+
+	-- Low light walls along both sides
+	if height > 0 then
+		for _, side in ipairs({ -1, 1 }) do
+			glow("GlowWall", Vector3.new(0.15, height, length), CFrame.new(side * width / 2, height / 2, 0), 0.8)
+		end
 	end
 
-	return ring
+	return bay
 end
 
 -- Procedural loop -------------------------------------------------------------------------
@@ -261,13 +263,13 @@ local function buildProcedural(track, center)
 	for index = 1, RouteConfig.StopCount do
 		local distance = (firstStop + (index - 1) * usable / math.max(RouteConfig.StopCount - 1, 1)) % length
 		local position, direction = pointAtDistance(points, cumulative, length, distance)
-		local stopCF = laneCFrame(position, direction, 0) -- ring centered on the road
+		local stopCF = laneCFrame(position, direction, -width / 4) -- bay in the left lane
 
 		local stopModel = Instance.new("Model")
 		stopModel.Name = "Stop_" .. index
 		stopModel.Parent = stopsFolder
 
-		addStopRing(stopModel, stopCF)
+		addStopBay(stopModel, stopCF)
 		local shelterCF = laneCFrame(position, direction, -(width / 2 + 6))
 		makePart(stopModel, "Platform", Vector3.new(8, 1, 20), shelterCF * CFrame.new(0, 0.5, 0), {
 			Color = Color3.fromRGB(160, 160, 160),
@@ -356,10 +358,13 @@ local function buildFromTemplate(track, template, center)
 	track.length = length
 
 	for i, part in ipairs(stopParts) do
-		addStopRing(part.Parent or map, CFrame.new(part.Position - Vector3.new(0, part.Size.Y / 2, 0)))
+		local ground = part.Position - Vector3.new(0, part.Size.Y / 2, 0)
+		local look = Vector3.new(part.CFrame.LookVector.X, 0, part.CFrame.LookVector.Z)
+		local bayCF = CFrame.lookAt(ground, ground + (look.Magnitude > 0.01 and look.Unit or -Vector3.zAxis))
+		addStopBay(part.Parent or map, bayCF)
 		track.stops[i] = {
 			index = i,
-			cframe = part.CFrame,
+			cframe = bayCF,
 			position = part.Position,
 			distance = cumulative[i],
 			marker = addStopMarker(track, i, part.Position),

@@ -1,7 +1,7 @@
 --[[
 	StopBillboards.lua
 
-	A floating card above every stop on YOUR track, visible only to you:
+	A small taped card above every stop on YOUR track, visible only to you:
 
 	    STOP 3                  9 waiting
 	    [ DROP OFF 4 ]               0:42
@@ -9,7 +9,8 @@
 	The drop-off row appears when you're carrying passengers for that stop,
 	with a live countdown to the soonest deadline (amber when close, red
 	"LATE" when missed). Stops with drop-offs show through walls, and the
-	most urgent one gets an accent border.
+	most urgent one gets a mustard border. Cards scale with the screen
+	like the rest of the UI (Theme.BillboardScale shrinks or grows them).
 
 	Driven by RouteClient: SetTrack(trackId) when your bus appears,
 	SetDrops(runState.drops, receivedAt) on every run-state update, Clear()
@@ -32,6 +33,8 @@ local StopBillboards = {}
 
 local TAG = "StopMarker"
 local URGENT_SECONDS = 15
+local BASE_SIZE = Vector2.new(190, 78)
+local SIZE_FACTOR = 0.75 -- billboards read fine a bit smaller than HUD panels
 
 local activeTrackId
 local cards = {} -- [marker] = card
@@ -45,6 +48,12 @@ local function setText(label, text)
 	end
 end
 
+local function applyScale(card)
+	local scale = UIKit.GetScale() * SIZE_FACTOR
+	card.gui.Size = UDim2.fromOffset(BASE_SIZE.X * scale, BASE_SIZE.Y * scale)
+	card.scale.Scale = scale
+end
+
 local function buildCard(marker)
 	local index = marker:GetAttribute("StopIndex") or 0
 
@@ -52,70 +61,78 @@ local function buildCard(marker)
 	gui.Name = "StopCard_" .. index
 	gui.Adornee = marker
 	gui.ResetOnSpawn = false
-	gui.Size = UDim2.fromOffset(230, 96)
-	gui.StudsOffsetWorldSpace = Vector3.new(0, 18, 0)
-	gui.MaxDistance = 1500
+	gui.StudsOffsetWorldSpace = Vector3.new(0, 12, 0)
+	gui.MaxDistance = 1400
 	gui.LightInfluence = 0
+	gui.ClipsDescendants = false
 	gui.Parent = playerGui
 
-	local panel = UIKit.Panel({ Size = UDim2.fromScale(1, 1), Parent = gui, stroke = false })
-	local stroke = UIKit.Stroke(panel)
-	UIKit.Padding(panel, { 12, 16, 12, 16 })
+	local holder = UIKit.Frame({ Size = UDim2.fromOffset(BASE_SIZE.X, BASE_SIZE.Y), Parent = gui })
+	local scale = Instance.new("UIScale")
+	scale.Parent = holder
 
-	UIKit.Text({
-		Text = "STOP " .. index,
-		size = "Title",
-		weight = "Heavy",
-		color = "Accent",
-		Size = UDim2.new(0.5, 0, 0, 24),
+	local panel = UIKit.Panel({
+		Size = UDim2.fromScale(1, 1),
+		padding = { 8, 12, 8, 14 },
+		tape = { "TopLeft" },
+		Parent = holder,
+	})
+	local stroke = panel:FindFirstChildOfClass("UIStroke")
+
+	UIKit.Brush({
+		Text = "Stop " .. index,
+		size = 22,
+		color = "Mustard",
+		Size = UDim2.new(0.55, 0, 0, 26),
 		Parent = panel,
 	})
 	local waiting = UIKit.Text({
 		size = "Small",
-		weight = "Medium",
+		weight = "Bold",
 		color = "TextMuted",
-		Size = UDim2.new(0.5, 0, 0, 24),
-		Position = UDim2.fromScale(0.5, 0),
+		Size = UDim2.new(0.45, 0, 0, 26),
+		Position = UDim2.fromScale(0.55, 0),
 		TextXAlignment = Enum.TextXAlignment.Right,
 		Parent = panel,
 	})
 
-	local row = UIKit.Frame({ Size = UDim2.new(1, 0, 0, 32), Position = UDim2.fromOffset(0, 38), Parent = panel })
+	local row = UIKit.Frame({ Size = UDim2.new(1, 0, 0, 28), Position = UDim2.fromOffset(0, 32), Parent = panel })
 	local chip = UIKit.Frame({
-		BackgroundTransparency = 0,
-		BackgroundColor3 = Theme.Colors.Positive,
-		Size = UDim2.new(0, 124, 1, 0),
+		BackgroundTransparency = 0.05,
+		BackgroundColor3 = Theme.Colors.Tape,
+		Size = UDim2.new(0, 104, 1, 0),
+		Rotation = -2,
 		Parent = row,
 	})
-	UIKit.Corner(chip, Theme.Radius.Pill)
-	local chipText = UIKit.Text({
-		size = "Small",
-		weight = "Heavy",
-		color = "OnAccent",
+	local chipText = UIKit.Brush({
+		size = 15,
+		color = "Ink",
+		tilt = 0,
 		Size = UDim2.fromScale(1, 1),
 		TextXAlignment = Enum.TextXAlignment.Center,
 		Parent = chip,
 	})
 	local timer = UIKit.Text({
-		size = "Title",
+		size = 22,
 		weight = "Heavy",
-		Size = UDim2.new(1, -132, 1, 0),
-		Position = UDim2.fromOffset(132, 0),
+		Size = UDim2.new(1, -110, 1, 0),
+		Position = UDim2.fromOffset(110, 0),
 		TextXAlignment = Enum.TextXAlignment.Right,
 		Parent = row,
 	})
 	local empty = UIKit.Text({
-		Text = "No drop-offs here",
+		Text = "No drop-offs",
 		size = "Small",
 		color = "TextDim",
 		Size = UDim2.fromScale(1, 1),
 		Parent = row,
 	})
 
-	return {
+	local card = {
 		marker = marker,
 		index = index,
 		gui = gui,
+		scale = scale,
 		stroke = stroke,
 		waiting = waiting,
 		chip = chip,
@@ -123,6 +140,8 @@ local function buildCard(marker)
 		timer = timer,
 		empty = empty,
 	}
+	applyScale(card)
+	return card
 end
 
 local function refreshCard(card, now)
@@ -135,7 +154,7 @@ local function refreshCard(card, now)
 	card.gui.AlwaysOnTop = drop ~= nil
 
 	if drop then
-		setText(card.chipText, "DROP OFF " .. drop.count)
+		setText(card.chipText, "Drop off " .. drop.count)
 		local remaining = drop.deadlineAt - now
 		if remaining > 0 then
 			setText(card.timer, Format.Time(remaining))
@@ -146,10 +165,12 @@ local function refreshCard(card, now)
 		end
 	end
 
-	local urgent = card.index == urgentIndex
-	card.stroke.Color = urgent and Theme.Colors.Accent or Theme.Colors.Stroke
-	card.stroke.Transparency = urgent and 0 or Theme.StrokeTransparency
-	card.stroke.Thickness = urgent and 2 or 1
+	if card.stroke then
+		local urgent = card.index == urgentIndex
+		card.stroke.Color = urgent and Theme.Colors.Mustard or Theme.Colors.PanelEdge
+		card.stroke.Transparency = urgent and 0 or 0.15
+		card.stroke.Thickness = urgent and 3 or 2
+	end
 end
 
 local function addMarker(marker)
@@ -186,6 +207,11 @@ function StopBillboards.SetTrack(trackId)
 	end
 	table.insert(connections, CollectionService:GetInstanceAddedSignal(TAG):Connect(addMarker))
 	table.insert(connections, CollectionService:GetInstanceRemovedSignal(TAG):Connect(removeMarker))
+	table.insert(connections, UIKit.ScaleChanged.Event:Connect(function()
+		for _, card in pairs(cards) do
+			applyScale(card)
+		end
+	end))
 	table.insert(connections, RunService.RenderStepped:Connect(function()
 		local now = os.clock()
 		for _, card in pairs(cards) do

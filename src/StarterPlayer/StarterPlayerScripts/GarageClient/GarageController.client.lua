@@ -94,7 +94,12 @@ local function render()
 		return
 	end
 
-	gui.headerLabel.Text = string.format("%s   ·   Level %d   ·   Rep %d", formatCash(state.cash), state.level, state.reputation)
+	gui.headerLabel.Text = string.format(
+		'<font color="#70D06E">%s</font>  <font color="#786E62">·</font>  <font color="#5898E8">Level %d</font>  <font color="#786E62">·</font>  <font color="#EEC648">Rep %d</font>',
+		formatCash(state.cash),
+		state.level,
+		state.reputation
+	)
 
 	local slotsText = string.format("Slots %d / %d unlocked", state.quote.slotsAfter, state.unlockedSlots)
 	if state.nextUnlockReputation then
@@ -121,7 +126,7 @@ local function render()
 	for category, row in pairs(gui.rows) do
 		local level = state.pending[category]
 		local confirmedLevel = state.confirmed[category]
-		row.levelLabel.Text = level .. " / " .. UpgradeConfig.MaxLevel
+		row.levelLabel.Text = level .. "/" .. UpgradeConfig.MaxLevel
 		local entry = UpgradeCatalog.Get(state.chassisId, category, level)
 		row.nameLabel.Text = category .. " · " .. (entry and entry.name or "Stock")
 		row.levelLabel.TextColor3 = level > confirmedLevel and Color3.fromRGB(70, 212, 140)

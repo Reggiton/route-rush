@@ -55,7 +55,7 @@ real art later (see *Extending*).
 | Throttle / brake-reverse | W / S | left stick | thumbstick |
 | Steer | A / D | left stick | thumbstick |
 | Handbrake | Space | X | — |
-| Board passengers (inside a stop ring) | press or hold E | A | Board button |
+| Board passengers (inside a stop bay) | press or hold E | A | Board button |
 | Toggle chase camera | C | R3 | — |
 
 ---
@@ -82,7 +82,8 @@ Intermission (30s) ──► Countdown (5s) ──► Running (300s) ──► R
   - Ready players stay Ready round after round. Racers who sat idle for a
     whole race (barely drove, delivered nobody) are set back to Not Ready.
   - All of this is tunable in `RouteConfig.lua` → *Ready-up*.
-- **Stops:** every stop is a glowing ring on the road. You don't have to stop:
+- **Stops:** every stop is a glowing rectangular bay in the left lane. Steer
+  the bus into it (it's narrower than the road). You don't have to stop:
   - **Boarding:** drive through and press or hold **E** to board passengers.
     The slower you're going, the faster they get on, and a full stop is
     fastest. Above 50 studs/s nobody boards. A quick drive-by grabs a
@@ -204,7 +205,9 @@ tunable number lives in a Config file.**
 | A hand-built route | add `Workspace.RouteMap` (Model); tag stop parts `RouteStop` + `Index` attribute, optional grid parts `RouteGrid` + `Index` |
 | Cross-server matchmaking | replace `BracketService.Assign()` |
 | Retime the garage swap animation | `TIMING` in `GarageSwapSequence.lua` |
-| Restyle the whole UI (colors, fonts, sizes) | `StarterPlayerScripts/UI/UITheme.lua` |
+| Restyle the whole UI (colors, fonts, sizes, overall UI scale) | `StarterPlayerScripts/UI/UITheme.lua` |
+| Add grunge textures, tape, brush-stroke and icon images | upload them, paste the ids into `Theme.Images` / `Theme.Icons` in `UITheme.lua` |
+| Resize stop bays | `RouteConfig.StopBayWidth` / `StopBayLength` / `StopGlowHeight` |
 | Upgrade names changed in the spreadsheet | regenerate `UpgradeCatalog.lua` (don't hand-edit) |
 
 ## Using your bus models

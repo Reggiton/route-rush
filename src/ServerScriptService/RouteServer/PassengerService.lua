@@ -6,7 +6,8 @@
 	  - Each stop has a queue of passengers, each headed 1-4 stops ahead.
 	    Queues refill over time. Stops are shared on a track: whoever
 	    gets there first gets first pick.
-	  - Every stop has a glowing ring. While a bus is inside it:
+	  - Every stop is a glowing bay in the left lane. While a bus's center
+	    is inside it:
 	      * it earns boarding allowance at Boarding.RatePerSecond(speed) --
 	        the slower it goes, the faster; a full stop is fastest
 	      * each RequestBoard (E press) spends allowance to board passengers
@@ -210,7 +211,10 @@ local function scan(dt)
 			local found
 			if not record.bus:GetAttribute("BrokenDown") then
 				for _, stop in ipairs(record.track.stops) do
-					if horizontalDistance(position, stop.position) <= RouteConfig.StopRadius then
+					-- Inside the stop's bay rectangle (bus center, ignoring height)?
+					local offset = stop.cframe:PointToObjectSpace(position)
+					if math.abs(offset.X) <= RouteConfig.StopBayWidth / 2 + RouteConfig.StopBayMargin
+						and math.abs(offset.Z) <= RouteConfig.StopBayLength / 2 + RouteConfig.StopBayMargin then
 						found = stop.index
 						break
 					end
