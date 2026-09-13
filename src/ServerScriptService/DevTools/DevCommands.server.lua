@@ -9,6 +9,7 @@
 	  /xp N       add N XP
 	  /resetdata  wipe your profile back to defaults
 	  /skip       end the current session phase now
+	  /hp N       set your bus's health to N% (during a route)
 ]]
 
 local RunService = game:GetService("RunService")
@@ -47,8 +48,20 @@ local COMMANDS = {
 	resetdata = function(player)
 		PlayerDataService.ResetData(player)
 	end,
-	skip = function()
+	skip = function(player)
+		-- Also readies you, so /skip in an empty lobby starts a race.
+		local ReadyService = require(ServerScriptService.RouteServer.ReadyService)
+		ReadyService.SetReady(player, true)
 		ServerSignals.SkipPhase:Fire()
+	end,
+	hp = function(player, text)
+		-- Set your bus's health to N% (during a route) to preview damage effects.
+		local BusSpawner = require(ServerScriptService.RouteServer.BusSpawner)
+		local bus = BusSpawner.GetBus(player)
+		if bus then
+			local percent = math.clamp(amountFrom(text), 0, 100)
+			bus:SetAttribute("Health", math.floor((bus:GetAttribute("MaxHealth") or 100) * percent / 100))
+		end
 	end,
 }
 
@@ -86,4 +99,4 @@ else
 	end
 end
 
-print("[DevCommands] Studio dev commands enabled: /cash N, /rep N, /xp N, /resetdata, /skip")
+print("[DevCommands] Studio dev commands enabled: /cash N, /rep N, /xp N, /resetdata, /skip, /hp N")

@@ -98,6 +98,7 @@ function BusSpawner.Spawn(player, track, slotIndex)
 		connections = {},
 	}
 	records[player] = record
+	player:SetAttribute("InRace", true)
 
 	seatPlayer(player, record)
 
@@ -185,6 +186,7 @@ function BusSpawner.Despawn(player)
 		return
 	end
 	records[player] = nil
+	player:SetAttribute("InRace", false)
 	for _, connection in ipairs(record.connections) do
 		connection:Disconnect()
 	end

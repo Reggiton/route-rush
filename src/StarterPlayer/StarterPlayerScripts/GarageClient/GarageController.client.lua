@@ -42,7 +42,6 @@ local RequestConfirm = Remotes:WaitForChild("RequestConfirm")
 local UpgradesConfirmed = Remotes:WaitForChild("UpgradesConfirmed")
 local GarageError = Remotes:WaitForChild("GarageError")
 
-local CLOSED_PHASES = { Countdown = true, Running = true }
 
 local gui = GarageGuiBuilder.Build(playerGui)
 local camera = workspace.CurrentCamera
@@ -125,9 +124,9 @@ local function render()
 		row.levelLabel.Text = level .. " / " .. UpgradeConfig.MaxLevel
 		local entry = UpgradeCatalog.Get(state.chassisId, category, level)
 		row.nameLabel.Text = category .. " · " .. (entry and entry.name or "Stock")
-		row.levelLabel.TextColor3 = level > confirmedLevel and Color3.fromRGB(120, 220, 140)
-			or level < confirmedLevel and Color3.fromRGB(240, 140, 110)
-			or Color3.new(1, 1, 1)
+		row.levelLabel.TextColor3 = level > confirmedLevel and Color3.fromRGB(70, 212, 140)
+			or level < confirmedLevel and Color3.fromRGB(255, 166, 64)
+			or Color3.fromRGB(242, 244, 248)
 
 		local describe = STAT_TEXT[category]
 		if describe then
@@ -156,8 +155,6 @@ local function render()
 	end
 
 	gui.confirmButton.Interactable = not swapping and state.canConfirm
-	gui.confirmButton.BackgroundColor3 = gui.confirmButton.Interactable and Color3.fromRGB(50, 140, 70)
-		or Color3.fromRGB(60, 70, 62)
 	gui.chassisPrev.Interactable = not swapping and state.tierIndex > 1
 	gui.chassisNext.Interactable = not swapping and state.tierIndex < state.tierCount
 end
@@ -302,9 +299,9 @@ local function closeLocal()
 	freezeRealCharacter(false)
 end
 
+-- The garage is available to anyone not currently in a race.
 local function refreshOpenButton()
-	local phase = ReplicatedStorage:GetAttribute("SessionPhase") or "Intermission"
-	gui.openButton.Visible = not isOpen and not CLOSED_PHASES[phase]
+	gui.openButton.Visible = not isOpen and not player:GetAttribute("InRace")
 end
 
 gui.openButton.MouseButton1Click:Connect(function()
@@ -350,9 +347,8 @@ GarageError.OnClientEvent:Connect(function(message)
 	end
 end)
 
-ReplicatedStorage:GetAttributeChangedSignal("SessionPhase"):Connect(function()
-	local phase = ReplicatedStorage:GetAttribute("SessionPhase")
-	if CLOSED_PHASES[phase] then
+player:GetAttributeChangedSignal("InRace"):Connect(function()
+	if player:GetAttribute("InRace") then
 		closeLocal()
 	end
 	refreshOpenButton()

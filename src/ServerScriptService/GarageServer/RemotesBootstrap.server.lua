@@ -38,6 +38,8 @@ local REMOTE_NAMES = {
 	"StopEvent",
 	"RunStateUpdated",
 	"RunResults",
+	"SetReady",
+	"Notify",
 }
 
 for _, remoteName in ipairs(REMOTE_NAMES) do

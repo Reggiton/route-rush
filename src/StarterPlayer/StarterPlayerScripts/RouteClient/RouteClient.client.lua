@@ -2,11 +2,11 @@
 	RouteClient.client.lua
 
 	Client side of the route loop. Wires:
-	  - session phase attributes      -> top-bar timer, countdown overlay
-	  - ProfileUpdated remote         -> cash / level / XP / rep
-	  - your bus appearing in the world -> drive controller + chase camera
-	  - RunStateUpdated / StopEvent   -> bus panel, boarding panel, toasts
-	  - RunResults                    -> results screen
+	  - session phase attributes        -> status pill, countdown, ready card
+	  - ProfileUpdated remote           -> profile card (cash / level / XP / rep)
+	  - your bus appearing in the world -> drive controller, chase camera, stop billboards
+	  - RunStateUpdated / StopEvent     -> bus card, boarding card, stop billboards, toasts
+	  - RunResults                      -> results card
 ]]
 
 local Players = game:GetService("Players")
@@ -17,10 +17,19 @@ local ContextActionService = game:GetService("ContextActionService")
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
-local RouteConfig = require(ReplicatedStorage:WaitForChild("Shared").Config.RouteConfig)
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local RouteConfig = require(Shared.Config.RouteConfig)
+local Boarding = require(Shared.Modules.Boarding)
+
+local UI = script.Parent.Parent:WaitForChild("UI")
+local UIKit = require(UI:WaitForChild("UIKit"))
+local Format = require(UI:WaitForChild("Format"))
+local Theme = UIKit.Theme
+
 local RouteHudBuilder = require(script.Parent.RouteHudBuilder)
 local BusDriveController = require(script.Parent.BusDriveController)
 local ChaseCamera = require(script.Parent.ChaseCamera)
+local StopBillboards = require(script.Parent.StopBillboards)
 
 local Remotes = ReplicatedStorage:WaitForChild("Remotes")
 local ProfileUpdated = Remotes:WaitForChild("ProfileUpdated")
@@ -28,59 +37,48 @@ local RequestBoard = Remotes:WaitForChild("RequestBoard")
 local StopEvent = Remotes:WaitForChild("StopEvent")
 local RunStateUpdated = Remotes:WaitForChild("RunStateUpdated")
 local RunResults = Remotes:WaitForChild("RunResults")
+local SetReady = Remotes:WaitForChild("SetReady")
+local Notify = Remotes:WaitForChild("Notify")
 
 local hud = RouteHudBuilder.Build(playerGui)
 
 local myBus
 local runState
-local boardCount = 1
-local lastAtStop = 0
 local boardBindingsActive = false
-
--- Formatting ---------------------------------------------------------------------------------
-
-local function formatCash(amount)
-	local digits = tostring(math.floor(math.abs(amount)))
-	local formatted = digits:reverse():gsub("(%d%d%d)", "%1,"):reverse():gsub("^,", "")
-	return (amount < 0 and "-$" or "$") .. formatted
-end
-
-local function formatTime(seconds)
-	seconds = math.max(0, math.ceil(seconds))
-	return string.format("%d:%02d", math.floor(seconds / 60), seconds % 60)
-end
+local boardHeld = false -- E / Board button held down: keeps boarding
+local lastBoardRequest = 0
 
 local PHASE_TEXT = {
-	Intermission = "Next route in",
-	Countdown = "Route starting",
+	Intermission = "Next route",
+	Waiting = "Waiting for players",
+	Countdown = "Get ready",
 	Running = "Route ends in",
-	Results = "Back to lobby in",
+	Results = "Back to lobby",
 }
 
--- Toasts ---------------------------------------------------------------------------------------
+local PHASE_LENGTH = {
+	Intermission = RouteConfig.IntermissionSeconds,
+	Countdown = RouteConfig.CountdownSeconds,
+	Running = RouteConfig.RunSeconds,
+	Results = RouteConfig.ResultsSeconds,
+}
 
-local toastToken = 0
-local function showToast(message, color)
-	toastToken = toastToken + 1
-	local myToken = toastToken
-	hud.toast.Text = message
-	hud.toast.TextColor3 = color or Color3.new(1, 1, 1)
-	hud.toast.Visible = true
-	task.delay(2.5, function()
-		if toastToken == myToken then
-			hud.toast.Visible = false
-		end
-	end)
+local function inRace()
+	return player:GetAttribute("InRace") == true
 end
 
 -- Profile -----------------------------------------------------------------------------------------
 
 ProfileUpdated.OnClientEvent:Connect(function(snapshot)
-	hud.cashLabel.Text = formatCash(snapshot.cash)
-	hud.levelLabel.Text = "Lv " .. snapshot.level
-	hud.repLabel.Text = "Rep " .. snapshot.reputation
-	local fraction = snapshot.xpForNext and snapshot.xpIntoLevel / snapshot.xpForNext or 1
-	hud.xpFill.Size = UDim2.fromScale(math.clamp(fraction, 0, 1), 1)
+	local profile = hud.profile
+	profile.cash.Text = Format.Cash(snapshot.cash)
+	profile.level.Text = tostring(snapshot.level)
+	profile.rep.Text = Format.Number(snapshot.reputation)
+	UIKit.SetFill(profile.xpFill, snapshot.xpForNext and snapshot.xpIntoLevel / snapshot.xpForNext or 1)
+end)
+
+Notify.OnClientEvent:Connect(function(message)
+	hud.toast(message, "Accent")
 end)
 
 -- Jumping out of the driver's seat ---------------------------------------------------------------
@@ -98,48 +96,48 @@ player.CharacterAdded:Connect(function(character)
 	setJumpEnabled(myBus == nil)
 end)
 
--- Boarding panel ----------------------------------------------------------------------------------
+-- Boarding card --------------------------------------------------------------------------------------
 
-local function maxBoardable()
-	if not runState then
-		return 0
-	end
-	return math.min(runState.waitingAtStop, runState.seatsLeft)
-end
-
-local function renderBoardPanel()
-	local phase = ReplicatedStorage:GetAttribute("SessionPhase")
+-- Shown while your bus is inside a stop's ring. Boarding speed depends on how
+-- slow you're going (Boarding.lua); the server decides how many actually board.
+local function renderBoardCard(phase, speed)
+	local board = hud.board
 	local visible = myBus ~= nil and runState ~= nil and runState.atStop > 0 and phase == "Running"
-	hud.boardPanel.Visible = visible
+	board.panel.Visible = visible
 	if not visible then
 		return
 	end
 
-	local maximum = maxBoardable()
-	boardCount = math.clamp(boardCount, math.min(1, maximum), maximum)
-	hud.boardTitle.Text = string.format("Stop %d · %d waiting · %d seats left", runState.atStop, runState.waitingAtStop, runState.seatsLeft)
-	hud.boardCount.Text = tostring(boardCount)
-	hud.boardMinus.Interactable = boardCount > 1
-	hud.boardPlus.Interactable = boardCount < maximum
-	hud.boardButton.Interactable = boardCount > 0
+	local rateFraction = math.clamp(Boarding.RatePerSecond(speed) / math.max(Boarding.RatePerSecond(0), 1e-6), 0, 1)
+	board.title.Text = "STOP " .. runState.atStop
+	board.subtitle.Text = string.format("%d waiting  ·  %s free", runState.waitingAtStop, Format.Count(runState.seatsLeft, "seat"))
+	UIKit.SetFill(board.rateFill, rateFraction, Theme.Colors.Negative:Lerp(Theme.Colors.Positive, rateFraction))
+	board.boardedCount.Text = string.format("%d BOARDED", runState.boardedThisStop or 0)
 
-	local capacity = math.max(runState.capacity, 1)
-	local loadAfter = (runState.passengers + boardCount) / capacity
-	if maximum == 0 then
-		hud.boardHint.Text = runState.seatsLeft == 0 and "Bus is full" or "Nobody waiting here"
+	local canBoard = runState.waitingAtStop > 0 and runState.seatsLeft > 0 and Boarding.CanBoard(speed)
+	board.button.Interactable = canBoard
+
+	local hint, tone
+	if runState.seatsLeft == 0 then
+		hint, tone = "Bus is full", "Warning"
+	elseif runState.waitingAtStop == 0 then
+		hint, tone = "Nobody waiting here", "TextMuted"
+	elseif not Boarding.CanBoard(speed) then
+		hint, tone = string.format("Too fast — slow below %d to board", RouteConfig.MaxBoardSpeed), "Negative"
+	elseif Boarding.IsStopped(speed) then
+		hint, tone = "Stopped — fastest boarding", "Positive"
 	else
-		hud.boardHint.Text = string.format("Load after boarding: %d%% — heavier = slower & slidier", math.floor(loadAfter * 100))
+		hint, tone = "Spam or hold E · slower = more passengers", "Text"
 	end
+	board.hint.Text = hint
+	board.hint.TextColor3 = Theme.Colors[tone]
 end
 
-local function adjustBoard(delta)
-	boardCount = boardCount + delta
-	renderBoardPanel()
-end
-
-local function confirmBoard()
-	if runState and runState.atStop > 0 and boardCount > 0 then
-		RequestBoard:FireServer(runState.atStop, boardCount)
+local function requestBoard()
+	local now = os.clock()
+	if runState and runState.atStop > 0 and now - lastBoardRequest >= RouteConfig.BoardPressCooldown then
+		lastBoardRequest = now
+		RequestBoard:FireServer(runState.atStop)
 	end
 end
 
@@ -151,58 +149,51 @@ local function setBoardBindings(enabled)
 	if enabled then
 		ContextActionService:BindAction("RouteRushBoard", function(_, state)
 			if state == Enum.UserInputState.Begin then
-				confirmBoard()
+				boardHeld = true
+				requestBoard()
+			elseif state == Enum.UserInputState.End or state == Enum.UserInputState.Cancel then
+				boardHeld = false
 			end
 			return Enum.ContextActionResult.Sink
 		end, false, Enum.KeyCode.E, Enum.KeyCode.ButtonA)
-		ContextActionService:BindAction("RouteRushBoardLess", function(_, state)
-			if state == Enum.UserInputState.Begin then
-				adjustBoard(-1)
-			end
-			return Enum.ContextActionResult.Sink
-		end, false, Enum.KeyCode.Z, Enum.KeyCode.DPadLeft)
-		ContextActionService:BindAction("RouteRushBoardMore", function(_, state)
-			if state == Enum.UserInputState.Begin then
-				adjustBoard(1)
-			end
-			return Enum.ContextActionResult.Sink
-		end, false, Enum.KeyCode.X, Enum.KeyCode.DPadRight)
 	else
+		boardHeld = false
 		ContextActionService:UnbindAction("RouteRushBoard")
-		ContextActionService:UnbindAction("RouteRushBoardLess")
-		ContextActionService:UnbindAction("RouteRushBoardMore")
 	end
 end
 
-hud.boardMinus.MouseButton1Click:Connect(function()
-	adjustBoard(-1)
+hud.board.button.MouseButton1Down:Connect(function()
+	boardHeld = true
+	requestBoard()
 end)
-hud.boardPlus.MouseButton1Click:Connect(function()
-	adjustBoard(1)
+hud.board.button.MouseButton1Up:Connect(function()
+	boardHeld = false
 end)
-hud.boardButton.MouseButton1Click:Connect(confirmBoard)
+hud.board.button.MouseLeave:Connect(function()
+	boardHeld = false
+end)
 
 RunStateUpdated.OnClientEvent:Connect(function(state)
 	runState = state
-	if state.atStop ~= lastAtStop then
-		lastAtStop = state.atStop
-		boardCount = maxBoardable() -- default: take everyone who fits
-	end
-	renderBoardPanel()
+	StopBillboards.SetDrops(state.drops, os.clock())
 end)
 
 StopEvent.OnClientEvent:Connect(function(event)
 	if event.kind == "delivered" then
-		showToast(
-			string.format("+%s · %d dropped off (%d on time)", formatCash(event.earned), event.count, event.onTime),
-			Color3.fromRGB(120, 220, 140)
-		)
+		local text = string.format("+%s  ·  %s dropped off", Format.Cash(event.earned), Format.Count(event.count, "passenger"))
+		if event.onTime > 0 then
+			text = text .. string.format("  ·  %d on time", event.onTime)
+		end
+		hud.toast(text, "Positive")
 	elseif event.kind == "boarded" then
-		showToast(string.format("%d passenger%s boarded", event.count, event.count == 1 and "" or "s"))
+		-- Quiet feedback (you may be spamming E): pulse the boarded counter.
+		local label = hud.board.boardedCount
+		label.TextTransparency = 0.6
+		UIKit.Tween(label, { TextTransparency = 0 }, 0.25)
 	elseif event.kind == "impact" then
-		showToast(string.format("Hit %s  −%d HP", tostring(event.what), event.damage), Color3.fromRGB(240, 160, 90))
+		hud.toast(string.format("Hit %s  ·  −%d HP", tostring(event.what), event.damage), "Warning")
 	elseif event.kind == "lost" then
-		showToast(string.format("Breakdown! %d passenger%s walked off", event.count, event.count == 1 and "" or "s"), Color3.fromRGB(240, 120, 100))
+		hud.toast(string.format("Breakdown!  %s walked off", Format.Count(event.count, "passenger")), "Negative")
 	end
 end)
 
@@ -232,12 +223,13 @@ local function detachBus()
 	end
 	myBus = nil
 	runState = nil
-	lastAtStop = 0
 	BusDriveController.Stop()
 	ChaseCamera.Stop()
+	StopBillboards.Clear()
 	setJumpEnabled(true)
-	hud.runPanel.Visible = false
-	renderBoardPanel()
+	hud.bus.panel.Visible = false
+	hud.speed.panel.Visible = false
+	hud.board.panel.Visible = false
 end
 
 local function attachBus(bus)
@@ -246,7 +238,9 @@ local function attachBus(bus)
 	setJumpEnabled(false)
 	ChaseCamera.Start(bus)
 	BusDriveController.Start(bus)
-	hud.runPanel.Visible = true
+	StopBillboards.SetTrack(bus:GetAttribute("TrackId"))
+	hud.bus.panel.Visible = true
+	hud.speed.panel.Visible = true
 end
 
 task.spawn(function()
@@ -264,6 +258,75 @@ task.spawn(function()
 	end
 end)
 
+-- Ready card --------------------------------------------------------------------------------------------
+
+local function isReady()
+	return player:GetAttribute("Ready") == true
+end
+
+local function renderReady(phase)
+	local racing = inRace()
+	hud.leaveButton.Visible = racing
+	hud.ready.panel.Visible = not racing
+	if racing then
+		return
+	end
+
+	local ready = isReady()
+	local readyCount, total = 0, 0
+	for _, other in ipairs(Players:GetPlayers()) do
+		total = total + 1
+		if other:GetAttribute("Ready") == true then
+			readyCount = readyCount + 1
+		end
+	end
+
+	local ui = hud.ready
+	if phase == "Countdown" or phase == "Running" then
+		ui.title.Text = "Race in progress"
+		ui.status.Text = ready and "Dropping you in…" or "Jump in now — you'll race the time that's left"
+		ui.button.Text = ready and "Cancel" or "Join race"
+	else
+		ui.title.Text = "Next race"
+		if phase == "Waiting" and readyCount == 0 then
+			ui.status.Text = "No race starts until someone readies up"
+		else
+			ui.status.Text = string.format("%d of %d players ready", readyCount, total)
+		end
+		ui.button.Text = ready and "Ready  ✓   (click to cancel)" or "Ready up"
+	end
+	UIKit.SetVariant(ui.button, ready and "secondary" or "primary")
+end
+
+hud.ready.button.MouseButton1Click:Connect(function()
+	SetReady:FireServer(not isReady())
+end)
+hud.leaveButton.MouseButton1Click:Connect(function()
+	SetReady:FireServer(false)
+end)
+
+-- Countdown ------------------------------------------------------------------------------------------------
+
+local lastCountdownText
+
+local function showCountdown(text, tone)
+	local countdown = hud.countdown
+	if text == lastCountdownText then
+		return
+	end
+	lastCountdownText = text
+	countdown.label.Text = text
+	countdown.label.TextColor3 = Theme.Colors[tone or "Text"]
+	countdown.label.Visible = true
+	countdown.pop.Scale = 1.35
+	UIKit.Tween(countdown.pop, { Scale = 1 }, 0.35, Enum.EasingStyle.Back)
+end
+
+local function hideCountdown()
+	lastCountdownText = nil
+	hud.countdown.label.Visible = false
+end
+
 -- Per-frame HUD ------------------------------------------------------------------------------------------
 
 local lastPhase
@@ -271,96 +334,89 @@ RunService.RenderStepped:Connect(function()
 	local phase = ReplicatedStorage:GetAttribute("SessionPhase") or "Intermission"
 	local endsAt = ReplicatedStorage:GetAttribute("PhaseEndsAt") or 0
 	local remaining = endsAt - workspace:GetServerTimeNow()
+	local racing = inRace()
 
-	hud.phaseLabel.Text = PHASE_TEXT[phase] or phase
-	hud.timerLabel.Text = formatTime(remaining)
+	-- Status pill
+	local status = hud.status
+	status.phase.Text = string.upper(PHASE_TEXT[phase] or phase)
+	status.timer.Text = phase == "Waiting" and "—" or Format.Time(remaining)
+	status.fares.Visible = racing and phase == "Running"
+	status.panel.Size = UDim2.fromOffset(status.fares.Visible and 310 or 200, 70)
+	local length = PHASE_LENGTH[phase]
+	UIKit.SetFill(status.progress, length and math.clamp(remaining / length, 0, 1) or 0)
 
+	renderReady(phase)
+
+	-- Countdown / GO
 	if phase ~= lastPhase then
-		if lastPhase == "Countdown" and phase == "Running" then
-			hud.countdownLabel.Text = "GO!"
-			hud.countdownLabel.Visible = true
-			task.delay(1, function()
-				if ReplicatedStorage:GetAttribute("SessionPhase") ~= "Countdown" then
-					hud.countdownLabel.Visible = false
+		if lastPhase == "Countdown" and phase == "Running" and racing then
+			showCountdown("GO!", "Positive")
+			task.delay(0.9, function()
+				if lastCountdownText == "GO!" then
+					hideCountdown()
 				end
 			end)
 		elseif phase ~= "Countdown" then
-			hud.countdownLabel.Visible = false
+			hideCountdown()
 		end
 		lastPhase = phase
-		renderBoardPanel()
 		setBoardBindings(false)
 	end
-	if phase == "Countdown" then
-		hud.countdownLabel.Visible = true
-		hud.countdownLabel.Text = tostring(math.max(1, math.ceil(remaining)))
+	if phase == "Countdown" and racing then
+		showCountdown(tostring(math.max(1, math.ceil(remaining))), "Text")
 	end
 
-	setBoardBindings(hud.boardPanel.Visible)
-
-	-- Bus panel
+	-- Bus
 	local bus = myBus
+	local telemetry = bus and BusDriveController.GetTelemetry()
+	local speed = telemetry and math.abs(telemetry.speed) or 0
+
+	renderBoardCard(phase, speed)
+	setBoardBindings(hud.board.panel.Visible)
+	if boardHeld and hud.board.panel.Visible then
+		requestBoard() -- holding E keeps boarding (rate-limited)
+	end
+
 	if not bus then
 		return
 	end
-	local telemetry = BusDriveController.GetTelemetry()
-	local speed = telemetry and math.abs(telemetry.speed) or 0
-	hud.speedLabel.Text = string.format("%d", math.floor(speed))
-	if telemetry and telemetry.sliding then
-		hud.speedLabel.TextColor3 = Color3.fromRGB(240, 140, 110)
-	else
-		hud.speedLabel.TextColor3 = Color3.new(1, 1, 1)
-	end
 
+	hud.speed.value.Text = tostring(math.floor(speed))
+	hud.speed.sliding.Visible = telemetry ~= nil and telemetry.sliding
+
+	local card = hud.bus
 	local passengers = bus:GetAttribute("Passengers") or 0
 	local capacity = math.max(bus:GetAttribute("Capacity") or 1, 1)
 	local load = passengers / capacity
-	hud.passengersLabel.Text = string.format("Passengers %d / %d", passengers, capacity)
-	hud.loadFill.Size = UDim2.fromScale(load, 1)
-	hud.loadFill.BackgroundColor3 = Color3.fromRGB(120, 220, 140):Lerp(Color3.fromRGB(240, 90, 70), load)
+	card.passengers.Text = string.format("%d / %d", passengers, capacity)
+	UIKit.SetFill(card.loadFill, load, Theme.Colors.Positive:Lerp(Theme.Colors.Warning, load))
 
 	local health = bus:GetAttribute("Health") or 0
 	local maxHealth = math.max(bus:GetAttribute("MaxHealth") or 1, 1)
-	hud.healthFill.Size = UDim2.fromScale(math.clamp(health / maxHealth, 0, 1), 1)
+	UIKit.SetFill(card.healthFill, health / maxHealth)
 	if bus:GetAttribute("BrokenDown") then
-		hud.healthLabel.Text = "BROKEN DOWN — repairing..."
+		card.health.Text = "BROKEN DOWN"
+		card.health.TextColor3 = Theme.Colors.Negative
 	else
-		hud.healthLabel.Text = string.format("Health %d / %d", health, maxHealth)
+		card.health.Text = string.format("%d / %d", health, maxHealth)
+		card.health.TextColor3 = Theme.Colors.Text
 	end
 
 	if runState then
-		hud.faresLabel.Text = formatCash(runState.fares)
-		hud.streakLabel.Text = string.format(
-			"Delivered %d · Collisions %d · Clean streak %d",
+		status.faresValue.Text = Format.Cash(runState.fares)
+		card.stats.Text = string.format(
+			"%d delivered  ·  streak %d  ·  %d hits",
 			runState.deliveries,
-			runState.collisions,
-			runState.cleanStreak
+			runState.cleanStreak,
+			runState.collisions
 		)
-
-		local root = bus.PrimaryPart
-		local target = runState.drops[1]
-		if root and target then
-			local offset = target.position - root.Position
-			local relative = root.CFrame:VectorToObjectSpace(offset)
-			hud.dropArrow.Visible = true
-			hud.dropArrow.Rotation = math.deg(math.atan2(relative.X, -relative.Z))
-			local deadlineText = target.soonestDeadline > 0 and (formatTime(target.soonestDeadline) .. " left") or "late"
-			hud.dropLabel.Text = string.format("Stop %d · %d pax · %d studs · %s", target.index, target.count, math.floor(offset.Magnitude), deadlineText)
-		else
-			hud.dropArrow.Visible = false
-			hud.dropLabel.Text = "No passengers — stop at a bus stop to load"
-		end
 	end
 
 	-- If throttle is held but the bus can't move, say why.
-	if telemetry and telemetry.problem then
-		hud.streakLabel.Text = "⚠ " .. telemetry.problem
-		hud.streakLabel.TextColor3 = Color3.fromRGB(240, 160, 90)
-	else
-		hud.streakLabel.TextColor3 = Color3.fromRGB(170, 170, 180)
-		if not runState then
-			hud.streakLabel.Text = ""
-		end
+	local problem = telemetry and telemetry.problem
+	card.problem.Visible = problem ~= nil
+	if problem then
+		card.problem.Text = "⚠  " .. problem
 	end
 end)
 
@@ -368,35 +424,35 @@ end)
 
 local resultsToken = 0
 RunResults.OnClientEvent:Connect(function(results)
-	local lines = {
-		string.format("Fares collected: <b>%s</b>", formatCash(results.fares)),
-		string.format("Passengers delivered: <b>%d</b> (%d on time)", results.deliveries, results.onTimeDeliveries),
-		string.format("Collisions: <b>%d</b>   Best clean streak: <b>%d</b>", results.collisions, results.bestCleanStreak),
-		string.format("Fares per minute: <b>%s</b>", formatCash(results.faresPerMinute)),
-	}
+	local card = hud.results
+	card.clear()
+	card.total.Text = Format.Cash(results.cash)
+
+	card.addRow("Fares collected", Format.Cash(results.fares))
+	card.addRow("Passengers delivered", string.format("%d  (%d on time)", results.deliveries, results.onTimeDeliveries))
+	card.addRow("Fares per minute", Format.Cash(results.faresPerMinute))
+	card.addRow("Collisions  ·  best clean streak", string.format("%d  ·  %d", results.collisions, results.bestCleanStreak))
 	if results.cleanBonus > 0 then
-		table.insert(lines, string.format("Clean-run bonus: <b>+%s</b>", formatCash(results.cleanBonus)))
+		card.addRow("Clean-run bonus", "+" .. Format.Cash(results.cleanBonus), "Positive")
 	end
 	if results.passengersLost > 0 then
-		table.insert(lines, string.format("Passengers lost to breakdowns: <b>%d</b>", results.passengersLost))
+		card.addRow("Lost to breakdowns", Format.Count(results.passengersLost, "passenger"), "Negative")
 	end
-	table.insert(lines, string.format("Reputation: <b>+%d</b>   XP: <b>+%d</b>", results.reputation, results.xp))
+	card.addRow("Reputation", "+" .. Format.Number(results.reputation), "Accent")
+	card.addRow("XP", "+" .. Format.Number(results.xp), "Info")
 	if results.levelAfter > results.levelBefore then
-		table.insert(lines, string.format('<font color="#5aa0f0"><b>LEVEL UP! Level %d</b></font>', results.levelAfter))
+		card.addRow("Level up!", "Level " .. results.levelAfter, "Info")
 	end
 	if results.slotsAfter > results.slotsBefore then
-		table.insert(lines, string.format('<font color="#fad23c"><b>%d new skill slots unlocked!</b></font>', results.slotsAfter - results.slotsBefore))
+		card.addRow("New skill slots unlocked", "+" .. (results.slotsAfter - results.slotsBefore), "Accent")
 	end
 
-	hud.resultsBody.Text = table.concat(lines, "\n")
-	hud.resultsTotal.Text = "Total earned: " .. formatCash(results.cash)
-	hud.resultsFrame.Visible = true
-
+	card.panel.Visible = true
 	resultsToken = resultsToken + 1
 	local myToken = resultsToken
 	task.delay(RouteConfig.ResultsSeconds, function()
 		if resultsToken == myToken then
-			hud.resultsFrame.Visible = false
+			card.panel.Visible = false
 		end
 	end)
 end)

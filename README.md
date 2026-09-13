@@ -30,7 +30,8 @@ This repo contains the **P0 core loop** from the Build Plan:
 2. From this folder run `rojo serve`, then connect from the Studio plugin.
 3. **Game Settings → Security → Enable Studio Access to API Services** (so
    progress saves in Studio; without it you get a working non-saving profile).
-4. Press Play. You spawn in the lobby and the intermission timer runs.
+4. Press Play. You spawn in the lobby. Click **Ready up** (bottom-left) to
+   join the next race; players who aren't Ready just stay in the lobby.
 
 Nothing needs to be placed by hand: the lobby, tracks, stops, buses, GUI and
 remotes are all built at runtime. You can replace the placeholders with
@@ -44,7 +45,8 @@ real art later (see *Extending*).
 | `/rep N` | add N reputation (unlocks slots) |
 | `/xp N` | add N XP (unlocks chassis tiers) |
 | `/resetdata` | wipe your profile |
-| `/skip` | end the current session phase now |
+| `/skip` | end the current session phase now (also marks you Ready) |
+| `/hp N` | set your bus's health to N% during a route (preview damage effects) |
 
 ### Controls
 
@@ -53,7 +55,7 @@ real art later (see *Extending*).
 | Throttle / brake-reverse | W / S | left stick | thumbstick |
 | Steer | A / D | left stick | thumbstick |
 | Handbrake | Space | X | — |
-| Board passengers | E (Z / X to change count) | A (D-pad to change count) | Board button |
+| Board passengers (inside a stop ring) | press or hold E | A | Board button |
 | Toggle chase camera | C | R3 | — |
 
 ---
@@ -68,17 +70,46 @@ Intermission (30s) ──► Countdown (5s) ──► Running (300s) ──► R
       ▲─────────────────────────────────────────────────────────────────────────┘
 ```
 
-- **Stops:** a bus is *at a stop* when it's inside the yellow zone and nearly
-  stopped. Passengers for that stop get off automatically and pay
-  `FareBase + FarePerStop × stops travelled`, plus 25% if delivered before
-  their deadline. Boarding is your choice: pick how many to take.
+- **Ready up:** only players who click **Ready** race. Everyone else stays
+  in the lobby (garage available).
+  - At least `MinReadyToStart` (1) player must be Ready. If the 30s
+    intermission runs out with nobody Ready, the server waits. Once someone
+    readies up, a 10s countdown starts.
+  - If every player in the server is Ready, the race starts after 3s.
+  - Readying up *during* a race drops you straight in (unless under 20s are
+    left). **Leave race** sends you back to the lobby, paid for what you've
+    delivered so far.
+  - Ready players stay Ready round after round. Racers who sat idle for a
+    whole race (barely drove, delivered nobody) are set back to Not Ready.
+  - All of this is tunable in `RouteConfig.lua` → *Ready-up*.
+- **Stops:** every stop is a glowing ring on the road. You don't have to stop:
+  - **Boarding:** drive through and press or hold **E** to board passengers.
+    The slower you're going, the faster they get on, and a full stop is
+    fastest. Above 50 studs/s nobody boards. A quick drive-by grabs a
+    couple; stopping takes the whole crowd. It's a trade-off: more
+    passengers per stop, or more stops.
+  - **Waiting passengers:** each stop still has a limited queue that refills
+    over time.
+  - **Drop-offs:** passengers for that stop get off automatically while you're
+    in the ring below 50 studs/s. They pay `FareBase + FarePerStop × stops
+    travelled`, plus 25% if delivered before their deadline.
+  - All of this is tunable in `RouteConfig.lua` → *Boarding on the move*.
+  - **Stop cards:** a card floats above every stop on your track, visible
+    only to you. It shows how many people are waiting, how many of *your*
+    passengers get off there, and a live countdown to their deadline
+    (amber when close, red when late). Stops with drop-offs show through
+    walls, and the most urgent one gets a yellow border.
 - **Load:** each passenger pushes the bus toward the full-load penalties
   (−15% top speed, −35% accel, −30% brakes, −40% grip). Handles upgrades
   soften the grip penalty.
-- **Collisions:** a speed drop larger than your brakes could cause counts
-  as an impact. Damage is reduced by the Health upgrade. At 0 HP the bus
-  breaks down for 5s and 25% of passengers walk off. Any collision resets
-  your clean streak and cancels the clean-run bonus.
+- **Collisions:** an impact needs both a sharp slowdown and something solid
+  (curb, obstacle, another bus) touching the bus. Damage is reduced by the
+  Health upgrade. At 0 HP the bus breaks down for 5s and 25% of passengers
+  walk off. Any collision resets your clean streak and cancels the
+  clean-run bonus.
+- **Damage visuals:** below 70% health a bus starts smoking from the hood and
+  turns red. Both get gradually stronger as health drops, with flames under
+  25% and a pulsing tint when critical. Tune in `Shared/Config/DamageEffectsConfig.lua`.
 - **Payout:** fares + clean-run bonus as cash. Reputation =
   fares/min × on-time factor × clean-streak factor. XP is based on cash
   and deliveries.
@@ -105,6 +136,8 @@ src/ReplicatedStorage/
     Config/UpgradeConfig.lua         categories, max level, chassis tiers (stats, prices, body shapes)
     Config/UpgradeCatalog.lua        GENERATED names/visuals for all 180 upgrades (from the spreadsheet)
     Config/GarageLayoutConfig.lua    garage camera/player/bus/behind offsets
+    Config/RestorationConfig.lua     which upgrade unrusts which part of the bus, at which levels
+    Modules/BusRestoration.lua       swaps rusted parts for pristine ones on a built bus
     Modules/BusBuilder.lua           builds a tier's bus: Root + visuals + one Attachment per category
     Modules/BusUpgradeApplier.lua    welds/unwelds upgrade models onto a bus
     Modules/UpgradeModelProvider.lua (category, level) -> Model  (placeholder blocks)
@@ -113,6 +146,8 @@ src/ReplicatedStorage/
     Config/EconomyConfig.lua         cash, slot prices, rep thresholds, XP curve, run rewards
     Config/DrivingConfig.lua         upgrade gains, load penalties, controller + collision tuning
     Config/RouteConfig.lua           phase timings, track generation, stops/passengers, brackets
+    Config/DamageEffectsConfig.lua   smoke / red tint / flames thresholds for damaged buses
+    Modules/Restoration.lua          pure math: restoration slices, % restored, fare bonus
     Modules/Progression.lua          pure math: levels, slots, quotes/refunds, fares, payout, reputation
     Modules/BusStats.lua             pure math: (chassis, levels, passengers) -> driving stats
     Modules/PowerScore.lua           pure math: Driving Power Score + bracket
@@ -131,6 +166,7 @@ src/ServerScriptService/
   RouteServer/PassengerService.lua          stop queues, boarding, drop-offs, fares
   RouteServer/RunScoring.lua                per-run stats -> payout + RunResults
   RouteServer/BracketService.lua            groups players into bracket tracks
+  RouteServer/ReadyService.lua              who is Ready (player attribute), SetReady remote
 
 src/StarterPlayer/StarterPlayerScripts/
   GarageClient/GarageController.client.lua  local garage scene + GUI wiring
@@ -140,6 +176,11 @@ src/StarterPlayer/StarterPlayerScripts/
   RouteClient/RouteHudBuilder.lua           builds the route HUD
   RouteClient/BusDriveController.lua        arcade driving physics (client-owned)
   RouteClient/ChaseCamera.lua               follow camera
+  RouteClient/BusDamageEffects.client.lua   smoke, red tint and flames on damaged buses
+  RouteClient/StopBillboards.lua            per-player stop cards: waiting, your drop-offs, deadlines
+  UI/UITheme.lua                            design tokens: colors, fonts, text sizes, radii, spacing
+  UI/UIKit.lua                              UI components (panels, text, buttons, bars, stats, scaling)
+  UI/Format.lua                             cash / time / count formatting
 
 tools/test/                                 unit tests for the pure modules (see Testing)
 ```
@@ -163,6 +204,7 @@ tunable number lives in a Config file.**
 | A hand-built route | add `Workspace.RouteMap` (Model); tag stop parts `RouteStop` + `Index` attribute, optional grid parts `RouteGrid` + `Index` |
 | Cross-server matchmaking | replace `BracketService.Assign()` |
 | Retime the garage swap animation | `TIMING` in `GarageSwapSequence.lua` |
+| Restyle the whole UI (colors, fonts, sizes) | `StarterPlayerScripts/UI/UITheme.lua` |
 | Upgrade names changed in the spreadsheet | regenerate `UpgradeCatalog.lua` (don't hand-edit) |
 
 ## Using your bus models

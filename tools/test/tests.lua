@@ -200,6 +200,25 @@ eq("single level region", Restoration.ThresholdFor({ levels = { 4 } }, 0.9, 0.9,
 eq("two-slice sweep front", Restoration.ThresholdFor({ levels = { 2, 8 }, sweep = "FrontToBack" }, 0.5, 0.5, 0.1), 2)
 eq("two-slice sweep back", Restoration.ThresholdFor({ levels = { 2, 8 }, sweep = "FrontToBack" }, 0.5, 0.5, 0.9), 8)
 
+-- Boarding on the move
+local Boarding = require(RS.Shared.Modules.Boarding)
+local RouteConfig = require(RS.Shared.Config.RouteConfig)
+eq("stopped = full slowness", Boarding.Slowness(0), 1)
+eq("at max board speed = no slowness", Boarding.Slowness(RouteConfig.MaxBoardSpeed), 0)
+eq("way too fast = no slowness", Boarding.Slowness(500), 0)
+eq("no boarding at max speed", Boarding.RatePerSecond(RouteConfig.MaxBoardSpeed), 0)
+check("can't board at max speed", not Boarding.CanBoard(RouteConfig.MaxBoardSpeed))
+check("can board when slow", Boarding.CanBoard(RouteConfig.MaxBoardSpeed - 1))
+eq("full stop rate", Boarding.RatePerSecond(0), RouteConfig.BoardRateMax * RouteConfig.FullStopBonus)
+local previousRate = math.huge
+for speed = 0, RouteConfig.MaxBoardSpeed + 10, 2 do
+	local rate = Boarding.RatePerSecond(speed)
+	check("slower boards faster (" .. speed .. ")", rate <= previousRate, rate)
+	previousRate = rate
+end
+check("stopping beats rolling", Boarding.RatePerSecond(0) > Boarding.RatePerSecond(RouteConfig.FullStopSpeed + 1))
+check("half speed boards less than half as fast (curve)", Boarding.RatePerSecond((RouteConfig.MaxBoardSpeed + RouteConfig.FullStopSpeed) / 2) < RouteConfig.BoardRateMax * 0.5)
+
 print(string.format("%d passed, %d failed", passes, failures))
 if failures > 0 then
 	error("tests failed")

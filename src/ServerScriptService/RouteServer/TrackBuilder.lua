@@ -14,7 +14,7 @@
 
 	Track table:
 	  { id, folder, busesFolder, length, points = {Vector3},
-	    stops = { {index, cframe, position, distance, label} },
+	    stops = { {index, cframe, position, distance, marker} },
 	    grid = {CFrame at ground level, facing forward} }
 
 	Traffic drives on the LEFT (Bangladesh), so stops sit on the left lane.
@@ -31,6 +31,7 @@ local ASPHALT = Color3.fromRGB(50, 50, 55)
 local CURB = Color3.fromRGB(190, 190, 190)
 local GRASS = Color3.fromRGB(90, 130, 70)
 local DASH = Color3.fromRGB(240, 200, 60)
+local RING_COLOR = Color3.fromRGB(255, 205, 70)
 
 local function getInstancesFolder()
 	local folder = workspace:FindFirstChild("RouteInstances")
@@ -90,38 +91,77 @@ local function laneCFrame(position, direction, lateral)
 	return CFrame.lookAt(lanePosition, lanePosition + direction)
 end
 
-local function addStopBillboard(adornee, parent, index)
-	local billboard = Instance.new("BillboardGui")
-	billboard.Name = "StopBillboard"
-	billboard.Size = UDim2.fromOffset(170, 64)
-	billboard.StudsOffsetWorldSpace = Vector3.new(0, 14, 0)
-	billboard.MaxDistance = 900
-	billboard.Adornee = adornee
-	billboard.Parent = parent
+--[[
+	An invisible anchor above a stop's ring. Clients find these by the
+	"StopMarker" tag and draw their own billboard on it (StopBillboards.lua),
+	so each player sees their own drop-offs and deadlines.
+	Attributes: TrackId, StopIndex, Waiting (kept up to date by PassengerService).
+]]
+local function addStopMarker(track, index, position)
+	local marker = Instance.new("Part")
+	marker.Name = "StopMarker_" .. index
+	marker.Anchored = true
+	marker.CanCollide = false
+	marker.CanQuery = false
+	marker.CanTouch = false
+	marker.CastShadow = false
+	marker.Transparency = 1
+	marker.Size = Vector3.new(1, 1, 1)
+	marker.CFrame = CFrame.new(position + Vector3.new(0, 0.5, 0))
+	marker:SetAttribute("TrackId", track.id)
+	marker:SetAttribute("StopIndex", index)
+	marker:SetAttribute("Waiting", 0)
+	CollectionService:AddTag(marker, "StopMarker")
+	marker.Parent = track.markers
+	return marker
+end
 
-	local title = Instance.new("TextLabel")
-	title.Size = UDim2.fromScale(1, 0.55)
-	title.BackgroundColor3 = Color3.fromRGB(30, 30, 35)
-	title.BackgroundTransparency = 0.2
-	title.Text = "STOP " .. index
-	title.TextScaled = true
-	title.Font = Enum.Font.GothamBlack
-	title.TextColor3 = Color3.fromRGB(250, 210, 60)
-	title.Parent = billboard
+-- A glowing ring on the road marking a stop's boarding area, plus a faint light column.
+local function addStopRing(parent, groundCFrame)
+	local radius = RouteConfig.StopRadius
+	local segments = RouteConfig.StopRingSegments
+	local center = groundCFrame.Position
+	local segmentLength = 2 * math.pi * radius / segments * 1.08
 
-	local waiting = Instance.new("TextLabel")
-	waiting.Name = "Waiting"
-	waiting.Size = UDim2.fromScale(1, 0.45)
-	waiting.Position = UDim2.fromScale(0, 0.55)
-	waiting.BackgroundColor3 = Color3.fromRGB(30, 30, 35)
-	waiting.BackgroundTransparency = 0.35
-	waiting.Text = "Waiting: 0"
-	waiting.TextScaled = true
-	waiting.Font = Enum.Font.GothamBold
-	waiting.TextColor3 = Color3.new(1, 1, 1)
-	waiting.Parent = billboard
+	local ring = Instance.new("Model")
+	ring.Name = "Ring"
+	ring.Parent = parent
 
-	return waiting
+	local glowProps = {
+		Color = RING_COLOR,
+		Material = Enum.Material.Neon,
+		CanCollide = false,
+		CanQuery = false,
+		CanTouch = false,
+		CastShadow = false,
+	}
+	for i = 0, segments - 1 do
+		local angle = i / segments * math.pi * 2
+		local point = center + Vector3.new(math.cos(angle) * radius, 0.35, math.sin(angle) * radius)
+		local tangent = Vector3.new(-math.sin(angle), 0, math.cos(angle))
+		makePart(ring, "RingSegment", Vector3.new(0.9, 0.3, segmentLength), CFrame.lookAt(point, point + tangent), glowProps)
+	end
+
+	if RouteConfig.StopColumnHeight > 0 then
+		local height = RouteConfig.StopColumnHeight
+		local column = makePart(
+			ring,
+			"LightColumn",
+			Vector3.new(height, radius * 2, radius * 2),
+			CFrame.new(center + Vector3.new(0, height / 2, 0)) * CFrame.Angles(0, 0, math.rad(90)),
+			glowProps
+		)
+		column.Shape = Enum.PartType.Cylinder
+		column.Transparency = 0.94
+
+		local light = Instance.new("PointLight")
+		light.Color = RING_COLOR
+		light.Range = radius * 1.5
+		light.Brightness = 1.5
+		light.Parent = column
+	end
+
+	return ring
 end
 
 -- Procedural loop -------------------------------------------------------------------------
@@ -221,26 +261,19 @@ local function buildProcedural(track, center)
 	for index = 1, RouteConfig.StopCount do
 		local distance = (firstStop + (index - 1) * usable / math.max(RouteConfig.StopCount - 1, 1)) % length
 		local position, direction = pointAtDistance(points, cumulative, length, distance)
-		local laneCF = laneCFrame(position, direction, -width / 4)
+		local stopCF = laneCFrame(position, direction, 0) -- ring centered on the road
 
 		local stopModel = Instance.new("Model")
 		stopModel.Name = "Stop_" .. index
 		stopModel.Parent = stopsFolder
 
-		makePart(stopModel, "Zone", Vector3.new(width / 2 - 1, 0.1, RouteConfig.StopRadius * 1.4), laneCF * CFrame.new(0, 0.06, 0), {
-			Color = Color3.fromRGB(250, 210, 60),
-			Material = Enum.Material.Neon,
-			Transparency = 0.7,
-			CanCollide = false,
-			CanQuery = false,
-			CanTouch = false,
-		})
+		addStopRing(stopModel, stopCF)
 		local shelterCF = laneCFrame(position, direction, -(width / 2 + 6))
 		makePart(stopModel, "Platform", Vector3.new(8, 1, 20), shelterCF * CFrame.new(0, 0.5, 0), {
 			Color = Color3.fromRGB(160, 160, 160),
 			Material = Enum.Material.Concrete,
 		})
-		local pole = makePart(stopModel, "Pole", Vector3.new(0.6, 10, 0.6), shelterCF * CFrame.new(2.5, 6, -8), {
+		makePart(stopModel, "Pole", Vector3.new(0.6, 10, 0.6), shelterCF * CFrame.new(2.5, 6, -8), {
 			Color = Color3.fromRGB(40, 120, 60),
 		})
 		makePart(stopModel, "Roof", Vector3.new(8, 0.5, 20), shelterCF * CFrame.new(0, 9, 0), {
@@ -249,10 +282,10 @@ local function buildProcedural(track, center)
 
 		track.stops[index] = {
 			index = index,
-			cframe = laneCF,
-			position = laneCF.Position,
+			cframe = stopCF,
+			position = stopCF.Position,
 			distance = distance,
-			label = addStopBillboard(pole, stopModel, index),
+			marker = addStopMarker(track, index, stopCF.Position),
 		}
 	end
 
@@ -323,12 +356,13 @@ local function buildFromTemplate(track, template, center)
 	track.length = length
 
 	for i, part in ipairs(stopParts) do
+		addStopRing(part.Parent or map, CFrame.new(part.Position - Vector3.new(0, part.Size.Y / 2, 0)))
 		track.stops[i] = {
 			index = i,
 			cframe = part.CFrame,
 			position = part.Position,
 			distance = cumulative[i],
-			label = addStopBillboard(part, part, i),
+			marker = addStopMarker(track, i, part.Position),
 		}
 	end
 
@@ -358,10 +392,20 @@ function TrackBuilder.Build(trackIndex)
 	busesFolder.Name = "Buses"
 	busesFolder.Parent = folder
 
+	-- Stop markers are always streamed to every client (billboards need them
+	-- even when the stop is far away).
+	local markers = Instance.new("Model")
+	markers.Name = "StopMarkers"
+	pcall(function()
+		markers.ModelStreamingMode = Enum.ModelStreamingMode.Persistent
+	end)
+	markers.Parent = folder
+
 	local track = {
 		id = trackIndex,
 		folder = folder,
 		busesFolder = busesFolder,
+		markers = markers,
 		center = center,
 		length = 0,
 		points = {},
