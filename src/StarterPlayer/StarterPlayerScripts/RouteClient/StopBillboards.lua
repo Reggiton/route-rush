@@ -1,16 +1,16 @@
 --[[
 	StopBillboards.lua
 
-	A small taped card above every stop on YOUR track, visible only to you:
+	A plain card above every stop on YOUR track, visible only to you:
 
-	    STOP 3                  9 waiting
-	    [ DROP OFF 4 ]               0:42
+	    STOP 3
+	    Waiting: 9
+	    Drop off 4 · 0:42
 
-	The drop-off row appears when you're carrying passengers for that stop,
-	with a live countdown to the soonest deadline (amber when close, red
+	The drop-off line appears when you're carrying passengers for that stop,
+	with a live countdown to the soonest deadline (orange when close, red
 	"LATE" when missed). Stops with drop-offs show through walls, and the
-	most urgent one gets a mustard border. Cards scale with the screen
-	like the rest of the UI (Theme.BillboardScale shrinks or grows them).
+	most urgent one gets a yellow outline.
 
 	Driven by RouteClient: SetTrack(trackId) when your bus appears,
 	SetDrops(runState.drops, receivedAt) on every run-state update, Clear()
@@ -22,9 +22,7 @@ local RunService = game:GetService("RunService")
 local CollectionService = game:GetService("CollectionService")
 
 local UI = script.Parent.Parent:WaitForChild("UI")
-local UIKit = require(UI:WaitForChild("UIKit"))
 local Format = require(UI:WaitForChild("Format"))
-local Theme = UIKit.Theme
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -33,8 +31,11 @@ local StopBillboards = {}
 
 local TAG = "StopMarker"
 local URGENT_SECONDS = 15
-local BASE_SIZE = Vector2.new(190, 78)
-local SIZE_FACTOR = 0.75 -- billboards read fine a bit smaller than HUD panels
+local DARK = Color3.fromRGB(30, 30, 35)
+local YELLOW = Color3.fromRGB(250, 210, 60)
+local GREEN = Color3.fromRGB(50, 140, 70)
+local ORANGE = Color3.fromRGB(200, 120, 40)
+local RED = Color3.fromRGB(170, 50, 45)
 
 local activeTrackId
 local cards = {} -- [marker] = card
@@ -48,10 +49,20 @@ local function setText(label, text)
 	end
 end
 
-local function applyScale(card)
-	local scale = UIKit.GetScale() * SIZE_FACTOR
-	card.gui.Size = UDim2.fromOffset(BASE_SIZE.X * scale, BASE_SIZE.Y * scale)
-	card.scale.Scale = scale
+local function makeLabel(parent, name, text, sizeY, posY, color, transparency, font)
+	local label = Instance.new("TextLabel")
+	label.Name = name
+	label.Size = UDim2.new(1, 0, sizeY, 0)
+	label.Position = UDim2.fromScale(0, posY)
+	label.BackgroundColor3 = color
+	label.BackgroundTransparency = transparency
+	label.BorderSizePixel = 0
+	label.Text = text
+	label.TextScaled = true
+	label.Font = font or Enum.Font.GothamBold
+	label.TextColor3 = Color3.new(1, 1, 1)
+	label.Parent = parent
+	return label
 end
 
 local function buildCard(marker)
@@ -61,115 +72,51 @@ local function buildCard(marker)
 	gui.Name = "StopCard_" .. index
 	gui.Adornee = marker
 	gui.ResetOnSpawn = false
+	gui.Size = UDim2.fromOffset(170, 80)
 	gui.StudsOffsetWorldSpace = Vector3.new(0, 12, 0)
 	gui.MaxDistance = 1400
-	gui.LightInfluence = 0
-	gui.ClipsDescendants = false
 	gui.Parent = playerGui
 
-	local holder = UIKit.Frame({ Size = UDim2.fromOffset(BASE_SIZE.X, BASE_SIZE.Y), Parent = gui })
-	local scale = Instance.new("UIScale")
-	scale.Parent = holder
+	local title = makeLabel(gui, "Title", "STOP " .. index, 0.4, 0, DARK, 0.2, Enum.Font.GothamBlack)
+	title.TextColor3 = YELLOW
+	local outline = Instance.new("UIStroke")
+	outline.Color = YELLOW
+	outline.Thickness = 2
+	outline.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	outline.Enabled = false
+	outline.Parent = title
 
-	local panel = UIKit.Panel({
-		Size = UDim2.fromScale(1, 1),
-		padding = { 8, 12, 8, 14 },
-		tape = { "TopLeft" },
-		Parent = holder,
-	})
-	local stroke = panel:FindFirstChildOfClass("UIStroke")
+	local waiting = makeLabel(gui, "Waiting", "Waiting: 0", 0.28, 0.4, DARK, 0.35)
+	local drop = makeLabel(gui, "Drop", "", 0.32, 0.68, GREEN, 0.1)
+	drop.Visible = false
 
-	UIKit.Brush({
-		Text = "Stop " .. index,
-		size = 22,
-		color = "Mustard",
-		Size = UDim2.new(0.55, 0, 0, 26),
-		Parent = panel,
-	})
-	local waiting = UIKit.Text({
-		size = "Small",
-		weight = "Bold",
-		color = "TextMuted",
-		Size = UDim2.new(0.45, 0, 0, 26),
-		Position = UDim2.fromScale(0.55, 0),
-		TextXAlignment = Enum.TextXAlignment.Right,
-		Parent = panel,
-	})
-
-	local row = UIKit.Frame({ Size = UDim2.new(1, 0, 0, 28), Position = UDim2.fromOffset(0, 32), Parent = panel })
-	local chip = UIKit.Frame({
-		BackgroundTransparency = 0.05,
-		BackgroundColor3 = Theme.Colors.Tape,
-		Size = UDim2.new(0, 104, 1, 0),
-		Rotation = -2,
-		Parent = row,
-	})
-	local chipText = UIKit.Brush({
-		size = 15,
-		color = "Ink",
-		tilt = 0,
-		Size = UDim2.fromScale(1, 1),
-		TextXAlignment = Enum.TextXAlignment.Center,
-		Parent = chip,
-	})
-	local timer = UIKit.Text({
-		size = 22,
-		weight = "Heavy",
-		Size = UDim2.new(1, -110, 1, 0),
-		Position = UDim2.fromOffset(110, 0),
-		TextXAlignment = Enum.TextXAlignment.Right,
-		Parent = row,
-	})
-	local empty = UIKit.Text({
-		Text = "No drop-offs",
-		size = "Small",
-		color = "TextDim",
-		Size = UDim2.fromScale(1, 1),
-		Parent = row,
-	})
-
-	local card = {
+	return {
 		marker = marker,
 		index = index,
 		gui = gui,
-		scale = scale,
-		stroke = stroke,
+		outline = outline,
 		waiting = waiting,
-		chip = chip,
-		chipText = chipText,
-		timer = timer,
-		empty = empty,
+		drop = drop,
 	}
-	applyScale(card)
-	return card
 end
 
 local function refreshCard(card, now)
-	setText(card.waiting, string.format("%d waiting", card.marker:GetAttribute("Waiting") or 0))
+	setText(card.waiting, "Waiting: " .. (card.marker:GetAttribute("Waiting") or 0))
 
 	local drop = drops[card.index]
-	card.chip.Visible = drop ~= nil
-	card.timer.Visible = drop ~= nil
-	card.empty.Visible = drop == nil
+	card.drop.Visible = drop ~= nil
 	card.gui.AlwaysOnTop = drop ~= nil
+	card.outline.Enabled = card.index == urgentIndex
 
 	if drop then
-		setText(card.chipText, "Drop off " .. drop.count)
 		local remaining = drop.deadlineAt - now
 		if remaining > 0 then
-			setText(card.timer, Format.Time(remaining))
-			card.timer.TextColor3 = remaining <= URGENT_SECONDS and Theme.Colors.Warning or Theme.Colors.Text
+			setText(card.drop, string.format("Drop off %d · %s", drop.count, Format.Time(remaining)))
+			card.drop.BackgroundColor3 = remaining <= URGENT_SECONDS and ORANGE or GREEN
 		else
-			setText(card.timer, "LATE")
-			card.timer.TextColor3 = Theme.Colors.Negative
+			setText(card.drop, string.format("Drop off %d · LATE", drop.count))
+			card.drop.BackgroundColor3 = RED
 		end
-	end
-
-	if card.stroke then
-		local urgent = card.index == urgentIndex
-		card.stroke.Color = urgent and Theme.Colors.Mustard or Theme.Colors.PanelEdge
-		card.stroke.Transparency = urgent and 0 or 0.15
-		card.stroke.Thickness = urgent and 3 or 2
 	end
 end
 
@@ -207,11 +154,6 @@ function StopBillboards.SetTrack(trackId)
 	end
 	table.insert(connections, CollectionService:GetInstanceAddedSignal(TAG):Connect(addMarker))
 	table.insert(connections, CollectionService:GetInstanceRemovedSignal(TAG):Connect(removeMarker))
-	table.insert(connections, UIKit.ScaleChanged.Event:Connect(function()
-		for _, card in pairs(cards) do
-			applyScale(card)
-		end
-	end))
 	table.insert(connections, RunService.RenderStepped:Connect(function()
 		local now = os.clock()
 		for _, card in pairs(cards) do

@@ -295,7 +295,7 @@ local function renderReady(phase)
 		end
 		ui.button.Text = ready and "Ready  ✓   (click to cancel)" or "Ready up"
 	end
-	UIKit.SetVariant(ui.button, ready and "secondary" or "primary")
+	ui.button.BackgroundColor3 = ready and Color3.fromRGB(70, 90, 75) or Color3.fromRGB(50, 140, 70)
 end
 
 hud.ready.button.MouseButton1Click:Connect(function()
