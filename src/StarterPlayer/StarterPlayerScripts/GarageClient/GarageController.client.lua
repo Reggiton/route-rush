@@ -94,12 +94,7 @@ local function render()
 		return
 	end
 
-	gui.headerLabel.Text = string.format(
-		'<font color="#65D176">%s</font>  <font color="#8A8F88">·</font>  <font color="#65D176">Level %d</font>  <font color="#8A8F88">·</font>  <font color="#65D176">Rep %d</font>',
-		formatCash(state.cash),
-		state.level,
-		state.reputation
-	)
+	gui.headerLabel.Text = string.format("%s  ·  Level %d  ·  Rep %d", formatCash(state.cash), state.level, state.reputation)
 
 	local slotsText = string.format("Slots %d/%d Unlocked", state.quote.slotsAfter, state.unlockedSlots)
 	if state.nextUnlockReputation then
@@ -126,7 +121,7 @@ local function render()
 	for category, row in pairs(gui.rows) do
 		local level = state.pending[category]
 		local confirmedLevel = state.confirmed[category]
-		row.levelLabel.Text = level .. "/" .. UpgradeConfig.MaxLevel
+		row.levelLabel.Text = level .. " / " .. UpgradeConfig.MaxLevel
 		local entry = UpgradeCatalog.Get(state.chassisId, category, level)
 		row.nameLabel.Text = category .. " · " .. (entry and entry.name or "Stock")
 		row.levelLabel.TextColor3 = level > confirmedLevel and Color3.fromRGB(70, 212, 140)
@@ -146,17 +141,17 @@ local function render()
 	local quote = state.quote
 	if not state.owned then
 		gui.quoteLabel.Text = state.blockReason or ("Buy this chassis for " .. formatCash(state.price))
-		gui.confirmLabel.Text = "BUY " .. formatCash(state.price)
+		gui.confirmLabel.Text = "Buy " .. formatCash(state.price)
 	elseif quote.added + quote.removed == 0 then
 		gui.quoteLabel.Text = state.selected and "No changes" or (state.blockReason or "Switch to this bus")
-		gui.confirmLabel.Text = state.selected and "CONFIRM" or "DRIVE THIS BUS"
+		gui.confirmLabel.Text = state.selected and "Confirm" or "Drive this bus"
 	else
 		local netText = quote.net >= 0 and ("Net -" .. formatCash(quote.net)) or ("Net +" .. formatCash(-quote.net))
 		gui.quoteLabel.Text = string.format("Cost %s · Refund %s · %s", formatCash(quote.cost), formatCash(quote.refund), netText)
 		if state.blockReason then
 			gui.quoteLabel.Text = gui.quoteLabel.Text .. " · " .. state.blockReason
 		end
-		gui.confirmLabel.Text = "CONFIRM"
+		gui.confirmLabel.Text = "Confirm"
 	end
 
 	gui.confirmButton.Interactable = not swapping and state.canConfirm

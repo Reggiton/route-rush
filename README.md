@@ -205,8 +205,7 @@ tunable number lives in a Config file.**
 | A hand-built route | add `Workspace.RouteMap` (Model); tag stop parts `RouteStop` + `Index` attribute, optional grid parts `RouteGrid` + `Index` |
 | Cross-server matchmaking | replace `BracketService.Assign()` |
 | Retime the garage swap animation | `TIMING` in `GarageSwapSequence.lua` |
-| Restyle the whole UI (colors, fonts, sizes, overall UI scale) | `StarterPlayerScripts/UI/UITheme.lua` |
-| Use the garage-art textures and icons | upload `assets/ui/` and paste the ids into `UITheme.lua` (steps in `assets/ui/README.md`) |
+| Restyle the garage / HUD / stop cards (plain original style) | `GarageGuiBuilder.lua`, `RouteHudBuilder.lua`, `StopBillboards.lua` |
 | Resize stop bays | `RouteConfig.StopBayWidth` / `StopBayLength` / `StopGlowHeight` |
 | Upgrade names changed in the spreadsheet | regenerate `UpgradeCatalog.lua` (don't hand-edit) |
 
