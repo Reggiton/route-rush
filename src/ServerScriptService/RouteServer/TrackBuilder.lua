@@ -24,6 +24,7 @@ local CollectionService = game:GetService("CollectionService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local RouteConfig = require(ReplicatedStorage.Shared.Config.RouteConfig)
+local TrackLayouts = require(ReplicatedStorage.Shared.Config.TrackLayouts)
 
 local TrackBuilder = {}
 
@@ -31,6 +32,7 @@ local ASPHALT = Color3.fromRGB(50, 50, 55)
 local CURB = Color3.fromRGB(190, 190, 190)
 local GRASS = Color3.fromRGB(90, 130, 70)
 local DASH = Color3.fromRGB(240, 200, 60)
+local EDGE_LINE = Color3.fromRGB(235, 235, 225)
 local RING_COLOR = Color3.fromRGB(255, 205, 70)
 
 local function getInstancesFolder()
@@ -168,34 +170,31 @@ end
 
 -- Procedural loop -------------------------------------------------------------------------
 
-local function generateLoopPoints(center)
+-- The layout supplies plain-number offsets; we make the Random and keep drawing
+-- from it afterwards (obstacles), so the draw order stays exactly as it was.
+local function generateLoopPoints(center, layout)
 	local rng = Random.new(RouteConfig.TrackSeed)
-	local phase1 = rng:NextNumber(0, math.pi * 2)
-	local phase2 = rng:NextNumber(0, math.pi * 2)
-	local segments = RouteConfig.TrackSegments
+	local offsets = layout.points(rng)
 
 	local points = {}
-	for i = 0, segments - 1 do
-		local angle = i / segments * math.pi * 2
-		local noise = RouteConfig.TrackRadiusNoise * (0.6 * math.sin(2 * angle + phase1) + 0.4 * math.sin(3 * angle + phase2))
-		points[i + 1] = center
-			+ Vector3.new(math.cos(angle) * RouteConfig.TrackRadiusX * (1 + noise), 0, math.sin(angle) * RouteConfig.TrackRadiusZ * (1 + noise))
+	for i, offset in ipairs(offsets) do
+		points[i] = center + Vector3.new(offset.x, offset.y or 0, offset.z)
 	end
 	return points, rng
 end
 
-local function buildProcedural(track, center)
+local function buildProcedural(track, center, layout)
 	local folder = track.folder
 	local roadFolder = Instance.new("Folder")
 	roadFolder.Name = "Road"
 	roadFolder.Parent = folder
 
-	local points, rng = generateLoopPoints(center)
+	local points, rng = generateLoopPoints(center, layout)
 	local cumulative, length = buildCumulative(points)
 	track.points = points
 	track.length = length
 
-	local width = RouteConfig.RoadWidth
+	local width = layout.roadWidth
 	local groundY = RouteConfig.TrackY
 
 	-- Ground
@@ -224,14 +223,26 @@ local function buildProcedural(track, center)
 			Color = ASPHALT,
 			Material = Enum.Material.Asphalt,
 		})
+		-- Curb-less layouts get a painted edge line instead of a wall: leaving the
+		-- road is allowed there, and BusMonitor tows you back for it.
 		for _, side in ipairs({ -1, 1 }) do
-			makePart(
-				roadFolder,
-				"Curb",
-				Vector3.new(1, RouteConfig.CurbHeight, segmentLength),
-				along * CFrame.new(side * (width / 2 + 0.5), RouteConfig.CurbHeight / 2, 0),
-				{ Color = CURB, Material = Enum.Material.Concrete }
-			)
+			if layout.curbs then
+				makePart(
+					roadFolder,
+					"Curb",
+					Vector3.new(1, RouteConfig.CurbHeight, segmentLength),
+					along * CFrame.new(side * (width / 2 + 0.5), RouteConfig.CurbHeight / 2, 0),
+					{ Color = CURB, Material = Enum.Material.Concrete }
+				)
+			else
+				makePart(
+					roadFolder,
+					"EdgeLine",
+					Vector3.new(0.5, 0.1, segmentLength),
+					along * CFrame.new(side * (width / 2 - 0.5), 0.05, 0),
+					{ Color = EDGE_LINE, Material = Enum.Material.SmoothPlastic, CanCollide = false, CanQuery = false, CanTouch = false }
+				)
+			end
 		end
 		makePart(roadFolder, "LaneDash", Vector3.new(0.4, 0.1, segmentLength * 0.45), along * CFrame.new(0, 0.05, 0), {
 			Color = DASH,
@@ -241,13 +252,16 @@ local function buildProcedural(track, center)
 		})
 	end
 
-	-- Start grid (behind the start distance), two columns, one per lane.
-	local startDistance = RouteConfig.GridRowSpacing * math.ceil(RouteConfig.GridSlots / 2) + 40
+	-- Start grid, behind the start distance, spread evenly across the road.
+	-- For two columns this is exactly the old +/- width/4.
+	local columns = layout.gridColumns
+	local rows = math.ceil(RouteConfig.GridSlots / columns)
+	local startDistance = RouteConfig.GridRowSpacing * rows + 40
 	for slot = 1, RouteConfig.GridSlots do
-		local row = math.floor((slot - 1) / 2)
-		local column = (slot - 1) % 2
+		local row = math.floor((slot - 1) / columns)
+		local column = (slot - 1) % columns
 		local position, direction = pointAtDistance(points, cumulative, length, startDistance - row * RouteConfig.GridRowSpacing)
-		local lateral = (column == 0 and -1 or 1) * width / 4
+		local lateral = (column - (columns - 1) / 2) * width / columns
 		track.grid[slot] = laneCFrame(position, direction, lateral)
 	end
 
@@ -257,7 +271,7 @@ local function buildProcedural(track, center)
 	stopsFolder.Name = "Stops"
 	stopsFolder.Parent = folder
 
-	local gridBack = startDistance - (math.ceil(RouteConfig.GridSlots / 2) - 1) * RouteConfig.GridRowSpacing
+	local gridBack = startDistance - (rows - 1) * RouteConfig.GridRowSpacing
 	local firstStop = startDistance + 80
 	local usable = (length + gridBack - 80) - firstStop
 	for index = 1, RouteConfig.StopCount do
@@ -387,7 +401,10 @@ end
 
 -- Public API ---------------------------------------------------------------------------------------
 
-function TrackBuilder.Build(trackIndex)
+-- layoutId is optional: an unknown or missing one resolves to the default
+-- layout, so callers that don't care keep the original behaviour.
+function TrackBuilder.Build(trackIndex, layoutId)
+	local layout = TrackLayouts.Resolve(layoutId)
 	local center = Vector3.new(RouteConfig.TrackOriginX + (trackIndex - 1) * RouteConfig.TrackSpacing, RouteConfig.TrackY, 0)
 
 	local folder = Instance.new("Folder")
@@ -412,6 +429,7 @@ function TrackBuilder.Build(trackIndex)
 		busesFolder = busesFolder,
 		markers = markers,
 		center = center,
+		layout = layout,
 		length = 0,
 		points = {},
 		stops = {},
@@ -422,10 +440,11 @@ function TrackBuilder.Build(trackIndex)
 	if template then
 		buildFromTemplate(track, template, center)
 	else
-		buildProcedural(track, center)
+		buildProcedural(track, center, layout)
 	end
 
 	folder:SetAttribute("TrackId", trackIndex)
+	folder:SetAttribute("LayoutId", layout.id)
 	folder.Parent = getInstancesFolder()
 	return track
 end
@@ -453,7 +472,8 @@ function TrackBuilder.NearestRoadCFrame(track, position)
 	end
 	local point = track.points[bestIndex]
 	local nextPoint = track.points[bestIndex % #track.points + 1]
-	return laneCFrame(point, (nextPoint - point).Unit, -RouteConfig.RoadWidth / 4)
+	local width = (track.layout and track.layout.roadWidth) or RouteConfig.RoadWidth
+	return laneCFrame(point, (nextPoint - point).Unit, -width / 4)
 end
 
 return TrackBuilder

@@ -10,7 +10,7 @@
 	and passengers for that stop get off; each speed tier also caps how many
 	you may pick up during that visit:
 
-	    30 mph -> 2        20 mph -> 4        10 mph -> the whole crowd
+	    45 studs/s (30 mph) -> 2     30 (20 mph) -> 4     15 (10 mph) -> everyone
 
 	The cap is cumulative for the visit, so braking part-way through a bay
 	unlocks the next tier and lets you take more. Everything here works in
@@ -33,10 +33,10 @@ end
 -- 0 means you are going too fast to pick anyone up; math.huge means only the
 -- bus's capacity limits you. Slower tiers are looser, so the best match wins.
 function Boarding.BoardCap(speed)
-	local mph = Boarding.Mph(speed)
+	speed = speed or 0
 	local cap = 0
 	for _, tier in ipairs(RouteConfig.BoardTiers) do
-		if mph <= tier.mph and tier.board > cap then
+		if speed <= tier.speed and tier.board > cap then
 			cap = tier.board
 		end
 	end
@@ -48,7 +48,7 @@ function Boarding.CanBoard(speed)
 end
 
 function Boarding.CanDropOff(speed)
-	return Boarding.Mph(speed) <= RouteConfig.DropOffMph
+	return (speed or 0) <= RouteConfig.DropOffSpeed
 end
 
 -- The least slowing down that would raise your cap, or nil if you are already
@@ -57,19 +57,19 @@ function Boarding.NextTier(speed)
 	local cap = Boarding.BoardCap(speed)
 	local best
 	for _, tier in ipairs(RouteConfig.BoardTiers) do
-		if tier.board > cap and (best == nil or tier.mph > best.mph) then
+		if tier.board > cap and (best == nil or tier.speed > best.speed) then
 			best = tier
 		end
 	end
 	return best
 end
 
--- Fastest you can be going and still pick anyone up.
-function Boarding.MaxBoardMph()
+-- Fastest you can be going and still pick anyone up (studs/s).
+function Boarding.MaxBoardSpeed()
 	local fastest = 0
 	for _, tier in ipairs(RouteConfig.BoardTiers) do
-		if tier.mph > fastest then
-			fastest = tier.mph
+		if tier.speed > fastest then
+			fastest = tier.speed
 		end
 	end
 	return fastest
@@ -80,7 +80,7 @@ end
 function Boarding.TiersBySpeed()
 	local sorted = table.clone(RouteConfig.BoardTiers)
 	table.sort(sorted, function(a, b)
-		return a.mph < b.mph
+		return a.speed < b.speed
 	end)
 	return sorted
 end

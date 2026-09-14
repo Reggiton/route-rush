@@ -17,7 +17,11 @@
 	    or lying on its side -> server reclaims and resets it to the road.
 
 	Other systems react through the callbacks passed to Start():
-	  onImpact(player, damage), onBreakdown(player)
+	  onImpact(player, damage), onBreakdown(player), onTowBack(player, seconds)
+
+	  - Tow-back: on layouts built without curbs (TrackLayouts), leaving the
+	    road for OffRoad.GraceSeconds freezes the bus briefly and puts it back
+	    on the tarmac. A time penalty, not damage.
 ]]
 
 local Players = game:GetService("Players")
@@ -33,10 +37,13 @@ local Remotes = ReplicatedStorage:WaitForChild("Remotes")
 local StopEvent = Remotes:WaitForChild("StopEvent")
 
 local C = DrivingConfig.Collision
+local O = DrivingConfig.OffRoad
 
 local BusMonitor = {}
 
 local connection
+local towTokens = {} -- [Player] = token of the tow currently freezing them
+local towUntil = {} -- [Player] = os.clock() before which no new tow can fire
 local callbacks = {}
 local states = {} -- [Player] = { bus, history = {{t, position}}, cooldownUntil, speedStrikes, flippedSince }
 local accumulator = 0
@@ -49,6 +56,51 @@ end
 local function resetBus(player, record, position)
 	BusSpawner.ResetTo(player, TrackBuilder.NearestRoadCFrame(record.track, position))
 	states[player] = nil
+end
+
+-- How far a position is from the road's centre line, horizontally.
+local function lateralFromRoad(track, position)
+	local lane = TrackBuilder.NearestRoadCFrame(track, position)
+	-- NearestRoadCFrame returns a LANE centre, so undo that offset to measure
+	-- against the middle of the road rather than the left lane.
+	local width = (track.layout and track.layout.roadWidth) or 0
+	local roadCentre = lane.Position + lane.RightVector * (width / 4)
+	return horizontal(position - roadCentre)
+end
+
+-- Put a bus that left the road back on it, frozen for a moment. Mirrors
+-- breakDown: same BrokenDown freeze (which the drive controller and
+-- PassengerService already honour), but no damage and no passengers lost --
+-- this is a time penalty, not a crash.
+local function towBack(player, record, position, speed, now)
+	local bus = record.bus
+	local seconds = math.min(
+		O.TowSeconds + speed * O.TowPerStudPerSecond,
+		O.TowMaxSeconds
+	)
+
+	bus:SetAttribute("Towing", true)
+	bus:SetAttribute("BrokenDown", true)
+	BusSpawner.ResetTo(player, TrackBuilder.NearestRoadCFrame(record.track, position))
+	StopEvent:FireClient(player, { kind = "towed", seconds = math.floor(seconds + 0.5) })
+
+	-- Token guard: a real breakdown during the tow must not have its own timer
+	-- cancelled early by ours, which would hand back free health.
+	local token = (towTokens[player] or 0) + 1
+	towTokens[player] = token
+	towUntil[player] = now + seconds + O.Cooldown
+
+	task.delay(seconds, function()
+		if bus.Parent and towTokens[player] == token and bus:GetAttribute("Towing") then
+			bus:SetAttribute("Towing", false)
+			bus:SetAttribute("BrokenDown", false)
+		end
+	end)
+
+	states[player] = nil -- drop stale history so the reposition isn't read as an impact
+	if callbacks.onTowBack then
+		callbacks.onTowBack(player, seconds)
+	end
 end
 
 local function breakDown(player, bus, stats)
@@ -112,6 +164,8 @@ local function sample(player, record, now)
 			history = {},
 			cooldownUntil = now + C.ImpactCooldown,
 			speedStrikes = 0,
+			offRoadSince = nil,
+			lastContactAt = nil,
 			flippedSince = nil,
 		}
 		states[player] = state
@@ -162,6 +216,21 @@ local function sample(player, record, now)
 	end
 	local recentSpeed = horizontal(position - recentEntry.position) / recentSpan
 
+	-- Off the road, on a layout with no curbs to stop you leaving it.
+	local layout = record.track.layout
+	if layout and not layout.curbs and not bus:GetAttribute("BrokenDown") and now >= (towUntil[player] or 0) then
+		if lateralFromRoad(record.track, position) > layout.roadWidth / 2 + O.Margin then
+			state.offRoadSince = state.offRoadSince or now
+			local shoved = state.lastContactAt and now - state.lastContactAt < O.ContactGraceSeconds
+			if now - state.offRoadSince >= O.GraceSeconds and not shoved then
+				towBack(player, record, position, recentSpeed, now)
+				return
+			end
+		else
+			state.offRoadSince = nil
+		end
+	end
+
 	-- Over-speed check
 	if recentSpeed > stats.topSpeed * C.SpeedTolerance + 5 then
 		state.speedStrikes = state.speedStrikes + 1
@@ -195,6 +264,13 @@ local function sample(player, record, now)
 		return
 	end
 
+	-- Remember being hit by another bus: on curb-less layouts that buys a short
+	-- window where getting shoved off the road costs no tow penalty, so ramming
+	-- someone into the grass isn't strictly better than ramming them anywhere else.
+	if hitPart:FindFirstAncestorWhichIsA("Model") and hitPart:FindFirstAncestorWhichIsA("Model"):GetAttribute("OwnerUserId") then
+		state.lastContactAt = now
+	end
+
 	state.cooldownUntil = now + C.ImpactCooldown
 	local damage = math.max(1, math.floor(excess * C.DamagePerStudPerSecond * stats.damageMult + 0.5))
 	local health = math.max(0, (bus:GetAttribute("Health") or stats.maxHealth) - damage)
@@ -214,6 +290,8 @@ function BusMonitor.Start(newCallbacks)
 	callbacks = newCallbacks or {}
 	accumulator = 0
 	distances = {}
+	towTokens = {}
+	towUntil = {}
 
 	connection = RunService.Heartbeat:Connect(function(dt)
 		accumulator = accumulator + dt

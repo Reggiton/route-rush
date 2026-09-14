@@ -39,6 +39,7 @@ local REMOTE_NAMES = {
 	"RunStateUpdated",
 	"RunResults",
 	"SetReady",
+	"SetMapVote",
 	"Notify",
 }
 

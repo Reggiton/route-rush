@@ -21,6 +21,9 @@
 	(including late joiners) can read it:
 	  SessionPhase  "Intermission" | "Waiting" | "Countdown" | "Running" | "Results"
 	  PhaseEndsAt   workspace:GetServerTimeNow() when the phase ends (0 = no timer)
+	  VoteOpen      true while the lobby map vote is taking votes
+	  VoteLeader    the layout currently winning that vote
+	  MapLayout     the layout this race is being run on
 ]]
 
 local Players = game:GetService("Players")
@@ -42,6 +45,7 @@ local PassengerService = require(RouteServer.PassengerService)
 local RunScoring = require(RouteServer.RunScoring)
 local BracketService = require(RouteServer.BracketService)
 local ReadyService = require(RouteServer.ReadyService)
+local MapVoteService = require(RouteServer.MapVoteService)
 
 local Remotes = ReplicatedStorage:WaitForChild("Remotes")
 local Notify = Remotes:WaitForChild("Notify")
@@ -191,6 +195,7 @@ local function runLobby()
 	local minimum = RouteConfig.MinReadyToStart
 	local endsAt = os.clock() + RouteConfig.IntermissionSeconds
 	setPhase("Intermission", RouteConfig.IntermissionSeconds)
+	MapVoteService.Begin()
 	skipRequested = false
 
 	while true do
@@ -242,13 +247,17 @@ local function runRound(participants)
 	}
 	currentRound = round
 
-	-- Countdown: build the world for this round.
+	-- Countdown: build the world for this round. The vote closes here, the last
+	-- moment before the tracks exist, so a late voter still counts. Both bracket
+	-- tracks use the same layout -- one vote, one map.
 	setPhase("Countdown", RouteConfig.CountdownSeconds)
+	local layoutId = MapVoteService.Close()
+	ReplicatedStorage:SetAttribute("MapLayout", layoutId)
 
 	local groups = BracketService.Assign(participants)
 	round.split = #groups > 1
 	for trackIndex in ipairs(groups) do
-		local track = TrackBuilder.Build(trackIndex)
+		local track = TrackBuilder.Build(trackIndex, layoutId)
 		round.tracks[trackIndex] = track
 		round.nextSlot[track.id] = 1
 	end
@@ -316,6 +325,7 @@ local function runRound(participants)
 
 	RunScoring.Finish()
 	BusSpawner.DespawnAll()
+	ReplicatedStorage:SetAttribute("MapLayout", nil)
 	for _, track in ipairs(round.tracks) do
 		TrackBuilder.Destroy(track)
 	end

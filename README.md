@@ -47,6 +47,7 @@ real art later (see *Extending*).
 | `/resetdata` | wipe your profile |
 | `/skip` | end the current session phase now (also marks you Ready) |
 | `/hp N` | set your bus's health to N% during a route (preview damage effects) |
+| `/map ID` | vote for a track layout; no argument lists the ids |
 
 ### Controls
 
@@ -70,6 +71,29 @@ Intermission (30s) ──► Countdown (5s) ──► Running (300s) ──► R
       ▲─────────────────────────────────────────────────────────────────────────┘
 ```
 
+- **Map vote:** the lobby panel above the Ready card lists the track layouts;
+  click one to vote, click it again to take your vote back. The tally is live
+  for everyone. The vote closes the moment the countdown starts, so a late
+  voter still counts, and both bracket tracks always use the same layout.
+  Nobody voting (or a tie) keeps the default City Loop, so an idle server
+  behaves exactly as it always has.
+
+  | Layout | Road | Edges |
+  | --- | --- | --- |
+  | City Loop | 2 lanes | hard curbs |
+  | Wide Boulevard | 4 lanes | **no curbs** — off-road gets you towed back |
+  | Hill Circuit | 2 lanes | hard curbs, two climbs and two descents |
+
+  Layouts live in `TrackLayouts.lua`: a name, a road width, whether to build
+  curbs, how many grid columns, and one function returning the closed ring of
+  points. Adding a fourth is that table plus a `points()`.
+- **Tow-back:** on a layout built without curbs there is no wall to stop you
+  leaving the road. Drift off for more than `OffRoad.GraceSeconds` (1.5s) and
+  a tow puts you back on the tarmac, frozen for a couple of seconds — longer
+  the faster you were going, capped. It is a time penalty, not damage: no
+  health lost and no passengers lost, so it always stays cheaper than a
+  breakdown. Getting shoved off by another bus within the last 2s doesn't
+  count, so ramming someone into the grass isn't a free win.
 - **Ready up:** only players who click **Ready** race. Everyone else stays
   in the lobby (garage available).
   - At least `MinReadyToStart` (1) player must be Ready. If the 30s
@@ -160,6 +184,7 @@ src/ReplicatedStorage/
     Config/EconomyConfig.lua         cash, slot prices, rep thresholds, XP curve, run rewards
     Config/DrivingConfig.lua         upgrade gains, load penalties, controller + collision tuning
     Config/RouteConfig.lua           phase timings, track generation, stops/passengers, brackets
+    Config/TrackLayouts.lua          the selectable track layouts (road width, curbs, shape)
     Config/DamageEffectsConfig.lua   smoke / red tint / flames thresholds for damaged buses
     Modules/Restoration.lua          pure math: restoration slices, % restored, fare bonus
     Modules/Progression.lua          pure math: levels, slots, quotes/refunds, fares, payout, reputation
@@ -174,7 +199,8 @@ src/ServerScriptService/
   DevTools/DevCommands.server.lua           Studio-only chat commands
   RouteServer/RouteSession.server.lua       the round state machine (entry point)
   RouteServer/LobbyBuilder.lua              finds or builds the lobby spawn
-  RouteServer/TrackBuilder.lua              builds a track (RouteMap template or procedural loop)
+  RouteServer/TrackBuilder.lua              builds a track (RouteMap template or a TrackLayouts layout)
+  RouteServer/MapVoteService.lua            lobby map vote: per-player votes, tally, winner
   RouteServer/BusSpawner.lua                spawn/seat/release/reset/despawn buses
   RouteServer/BusMonitor.lua                server collisions, breakdowns, anti-cheat resets
   RouteServer/PassengerService.lua          stop queues, boarding, drop-offs, fares
@@ -220,6 +246,8 @@ tunable number lives in a Config file.**
 | Retime the garage swap animation | `TIMING` in `GarageSwapSequence.lua` |
 | Restyle the garage / HUD / stop cards (plain original style) | `GarageGuiBuilder.lua`, `RouteHudBuilder.lua`, `StopPanel.lua` |
 | Resize stop bays | `RouteConfig.StopBayWidth` / `StopBayLength` / `StopGlowHeight` |
+| Add a track layout to the vote | `TrackLayouts.lua` (one table entry + a `points()` returning a closed ring) |
+| Retune the off-road tow penalty | `DrivingConfig.OffRoad` |
 | Upgrade names changed in the spreadsheet | regenerate `UpgradeCatalog.lua` (don't hand-edit) |
 
 ## Using your bus models

@@ -46,7 +46,8 @@ RouteConfig.CurbHeight = 4 -- roadside barriers; taller than any bus's ride heig
 RouteConfig.GrassMargin = 300 -- studs of ground around the loop
 RouteConfig.ObstacleChance = 0.3 -- chance per segment of a parked obstacle
 RouteConfig.GridRowSpacing = 46 -- studs between start grid rows (longest bus is 40)
-RouteConfig.GridSlots = 24 -- 2 per row
+RouteConfig.GridSlots = 24 -- spread across the layout's gridColumns
+RouteConfig.HillAmplitude = 55 -- studs of climb/descent on the Hill Circuit layout
 
 -- Stops & passengers ------------------------------------------------------------------
 RouteConfig.StopCount = 8
@@ -69,14 +70,18 @@ RouteConfig.StopGlowHeight = 2.5 -- low light walls along the bay's sides (0 = n
 -- The cap counts everyone boarded during this visit, so you can take 2 at 30,
 -- brake to 20 and take 2 more. Above the fastest tier nothing happens at all.
 -- Dropping one passenger off is cheap; filling the bus costs you real time.
-RouteConfig.StudsPerMph = 1.6 -- a Roblox stud is ~0.28 m, so 1 mph ~= 1.6 studs/s
-RouteConfig.DropOffMph = 30 -- at or under this, passengers for this stop get off
+-- Thresholds are stored in studs/second -- the unit the game actually measures --
+-- so retuning the speedometer can never silently move them. StudsPerMph is a
+-- DISPLAY conversion only: it turns studs/s into the mph the HUD shows, and the
+-- tier speeds below are chosen to land on round mph numbers under it.
+RouteConfig.StudsPerMph = 1.5 -- display only; 1 stud ~= 0.28 m, so this is close to true
+RouteConfig.DropOffSpeed = 45 -- studs/s (30 mph): at or under this, passengers get off
 -- Order does not matter; Boarding.lua takes the best cap you qualify for.
 -- math.huge means "no limit beyond the bus's own capacity".
 RouteConfig.BoardTiers = {
-	{ mph = 30, board = 2 },
-	{ mph = 20, board = 4 },
-	{ mph = 10, board = math.huge },
+	{ speed = 45, board = 2 }, -- 30 mph
+	{ speed = 30, board = 4 }, -- 20 mph
+	{ speed = 15, board = math.huge }, -- 10 mph
 }
 RouteConfig.MaxBoardPerPress = 2 -- passengers one E press can board
 RouteConfig.BoardPressCooldown = 0.1 -- seconds; holding E repeats at this rate

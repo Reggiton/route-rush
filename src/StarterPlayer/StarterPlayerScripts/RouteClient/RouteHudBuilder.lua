@@ -8,7 +8,7 @@
 
 	  top-center     timer | cash | level + XP | rep (| fares) + toast
 	  top-left       Leave race button (in a race)
-	  bottom-left    Ready card (lobby) / bus panel (in a race)
+	  bottom-left    map vote + Ready card (lobby) / bus panel (in a race)
 	  bottom-center  boarding panel (inside a stop bay)
 	  bottom-right   speedometer (mph dial, ticks banded by boarding tier)
 	  center         countdown, results
@@ -18,6 +18,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Boarding = require(Shared.Modules.Boarding)
+local TrackLayouts = require(Shared.Config.TrackLayouts)
 
 local RouteHudBuilder = {}
 
@@ -204,6 +205,51 @@ function RouteHudBuilder.Build(playerGui)
 		hud.ready = { panel = panel, title = title, status = status, button = readyButton }
 	end
 
+	-- Map vote (bottom-left, above the Ready card, lobby only) ------------------------------------
+	do
+		local ROW_HEIGHT = 46
+		local layouts = TrackLayouts.List
+		local height = 30 + #layouts * (ROW_HEIGHT + 6) + 4
+
+		-- Anchored at its bottom edge so it stacks directly on top of the Ready
+		-- card (which spans screenHeight-140 .. -20) however many layouts there are.
+		local panel = frame(screenGui, "MapVote", UDim2.fromOffset(260, height), UDim2.new(0, 20, 1, -150), {
+			AnchorPoint = Vector2.new(0, 1),
+			BackgroundTransparency = 0.15,
+			Visible = false,
+		})
+		corner(panel)
+
+		local title = label(panel, "Title", "VOTE NEXT MAP", UDim2.fromOffset(240, 16), UDim2.fromOffset(10, 8), {
+			TextXAlignment = Enum.TextXAlignment.Left,
+			TextColor3 = MUTED,
+		})
+
+		local rows = {}
+		for index, layout in ipairs(layouts) do
+			local y = 30 + (index - 1) * (ROW_HEIGHT + 6)
+			local row = button(panel, "Vote_" .. layout.id, "", UDim2.fromOffset(240, ROW_HEIGHT), UDim2.fromOffset(10, y), ROW_BG)
+
+			local name = label(row, "Name", layout.name, UDim2.fromOffset(170, 15), UDim2.fromOffset(8, 5), {
+				TextXAlignment = Enum.TextXAlignment.Left,
+			})
+			local count = label(row, "Count", "0", UDim2.fromOffset(44, 15), UDim2.fromOffset(186, 5), {
+				TextXAlignment = Enum.TextXAlignment.Right,
+				TextColor3 = MUTED,
+			})
+			label(row, "Blurb", layout.blurb, UDim2.fromOffset(222, 12), UDim2.fromOffset(8, 21), {
+				TextXAlignment = Enum.TextXAlignment.Left,
+				TextColor3 = MUTED,
+				Font = Enum.Font.Gotham,
+			})
+			local _, fill = bar(row, "Share", UDim2.fromOffset(222, 5), UDim2.fromOffset(8, 36), YELLOW)
+
+			rows[layout.id] = { button = row, name = name, count = count, fill = fill }
+		end
+
+		hud.vote = { panel = panel, title = title, rows = rows }
+	end
+
 	-- Bus panel (bottom-left, in a race) --------------------------------------------------------------
 	do
 		local panel = frame(screenGui, "Bus", UDim2.fromOffset(310, 150), UDim2.new(0, 20, 1, -170), {
@@ -288,7 +334,7 @@ function RouteHudBuilder.Build(playerGui)
 		local BANDS = { GREEN, YELLOW, ORANGE }
 		local function tickColor(mph)
 			for i, tier in ipairs(tiers) do
-				if mph <= tier.mph then
+				if mph <= Boarding.Mph(tier.speed) then
 					return BANDS[math.min(i, #BANDS)]
 				end
 			end
@@ -313,12 +359,23 @@ function RouteHudBuilder.Build(playerGui)
 			end
 		end
 
-		local needle = frame(dial, "Needle", UDim2.fromOffset(3, NEEDLE_LENGTH), UDim2.fromScale(0.5, 0.5), {
-			AnchorPoint = Vector2.new(0.5, 1),
+		-- The needle lives inside a square container centred on the dial, and we
+		-- rotate the CONTAINER. Its centre and the dial's centre are the same
+		-- point, so the sweep pivots correctly no matter how Rotation treats
+		-- AnchorPoint -- rotating an anchored-at-its-base needle directly does
+		-- not sweep from the hub.
+		local rotator = frame(dial, "Needle", UDim2.fromOffset(NEEDLE_LENGTH * 2, NEEDLE_LENGTH * 2), UDim2.fromScale(0.5, 0.5), {
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			BackgroundTransparency = 1,
+		})
+		rotator.Rotation = START_ANGLE
+
+		-- Upper half of the container: from its centre (the hub) straight up.
+		local needle = frame(rotator, "Pointer", UDim2.new(0, 3, 0.5, 0), UDim2.fromScale(0.5, 0), {
+			AnchorPoint = Vector2.new(0.5, 0),
 			BackgroundColor3 = RED,
 		})
 		corner(needle, 2)
-		needle.Rotation = START_ANGLE
 
 		local hub = frame(dial, "Hub", UDim2.fromOffset(14, 14), UDim2.fromScale(0.5, 0.5), {
 			AnchorPoint = Vector2.new(0.5, 0.5),
@@ -340,10 +397,10 @@ function RouteHudBuilder.Build(playerGui)
 			Visible = false,
 		})
 
-		local speed = { panel = panel, needle = needle, value = value, sliding = sliding }
+		local speed = { panel = panel, needle = rotator, value = value, sliding = sliding }
 
 		function speed.set(mph)
-			needle.Rotation = angleFor(mph)
+			rotator.Rotation = angleFor(mph)
 			local rounded = tostring(math.floor(mph + 0.5))
 			if value.Text ~= rounded then
 				value.Text = rounded
