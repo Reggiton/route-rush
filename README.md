@@ -206,7 +206,7 @@ tunable number lives in a Config file.**
 | Cross-server matchmaking | replace `BracketService.Assign()` |
 | Retime the garage swap animation | `TIMING` in `GarageSwapSequence.lua` |
 | Restyle the whole UI (colors, fonts, sizes, overall UI scale) | `StarterPlayerScripts/UI/UITheme.lua` |
-| Add grunge textures, tape, brush-stroke and icon images | upload them, paste the ids into `Theme.Images` / `Theme.Icons` in `UITheme.lua` |
+| Use the garage-art textures and icons | upload `assets/ui/` and paste the ids into `UITheme.lua` (steps in `assets/ui/README.md`) |
 | Resize stop bays | `RouteConfig.StopBayWidth` / `StopBayLength` / `StopGlowHeight` |
 | Upgrade names changed in the spreadsheet | regenerate `UpgradeCatalog.lua` (don't hand-edit) |
 

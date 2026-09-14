@@ -7,7 +7,7 @@
 
 	Every screen corner is one UIKit.Dock, so each corner scales with the
 	screen as a unit:
-	  top-center    top bar: phase + timer | cash | level + XP | rep (| fares) + toasts
+	  top-center    top bar (matches the garage concept art): timer | cash | level + XP | rep (| fares) + toasts
 	  top-left      Leave race button (in a race)
 	  bottom-center Ready card (lobby) / Boarding card (inside a stop bay)
 	  bottom-left   bus card: passengers, health, run stats
@@ -22,6 +22,7 @@ local Theme = UIKit.Theme
 local RouteHudBuilder = {}
 
 local M = Theme.ScreenMargin
+local SOFT_GREY = Color3.fromRGB(200, 200, 200)
 
 local function divider(parent, props)
 	return UIKit.Frame({
@@ -40,116 +41,149 @@ function RouteHudBuilder.Build(playerGui)
 	local hud = { screenGui = screenGui }
 
 	-- Top bar + toasts (top-center) -------------------------------------------------------------------
+	-- Positions are the concept art's pixels (bar is 556 x 46).
 	do
+		local BAR_WIDTH, FARES_WIDTH = 556, 120
+
 		local dock = UIKit.Dock({
 			Name = "TopDock",
 			AnchorPoint = Vector2.new(0.5, 0),
-			Position = UDim2.new(0.5, 0, 0, 6),
-			Size = UDim2.fromOffset(820, 200),
+			Position = UDim2.new(0.5, 0, 0, 0),
+			Size = UDim2.fromOffset(760, 220),
 			Parent = screenGui,
 		})
-		UIKit.List(dock, { gap = 10, align = "Center" })
+		UIKit.List(dock, { gap = 8, align = "Center" })
 
+		local holder = UIKit.Frame({ Name = "TopBarHolder", Size = UDim2.fromOffset(BAR_WIDTH, 46), LayoutOrder = 1, Parent = dock })
 		local bar = UIKit.Panel({
 			Name = "TopBar",
-			Size = UDim2.fromOffset(0, 62),
-			AutomaticSize = Enum.AutomaticSize.X,
-			LayoutOrder = 1,
-			padding = { 6, 20, 8, 20 },
-			tape = { "TopLeft", "TopRight" },
-			Parent = dock,
+			image = "TopBar",
+			radius = Theme.Radius.Small,
+			Size = UDim2.fromScale(1, 1),
+			Parent = holder,
 		})
-		local row = UIKit.Frame({
-			Name = "Row",
-			Size = UDim2.fromScale(0, 1),
-			AutomaticSize = Enum.AutomaticSize.X,
+
+		local function tapeAt(x, rotation)
+			local tape = UIKit.Tape(holder, "TopLeft")
+			tape.Position = UDim2.fromOffset(x, 4)
+			tape.Size = UDim2.fromOffset(34, 16)
+			tape.Rotation = rotation
+			return tape
+		end
+		tapeAt(8, -38)
+		local rightTape = tapeAt(BAR_WIDTH - 8, 38)
+
+		UIKit.Icon({ icon = "Timer", color = "Text", Position = UDim2.fromOffset(10, 6), Size = UDim2.fromOffset(25, 25), Parent = bar })
+		local phase = UIKit.Text({
+			Text = "Next route",
+			weight = "Regular",
+			size = 13,
+			color = SOFT_GREY,
+			Position = UDim2.fromOffset(45, 3),
+			Size = UDim2.fromOffset(115, 14),
 			Parent = bar,
 		})
-		UIKit.List(row, { direction = "Horizontal", gap = 18, valign = "Center" })
-
-		-- Phase + timer
-		local timerBlock = UIKit.Frame({ Size = UDim2.fromOffset(112, 46), LayoutOrder = 1, Parent = row })
-		local phase = UIKit.Caption({ Text = "Next route", Size = UDim2.new(1, 0, 0, 14), Parent = timerBlock })
 		local timer = UIKit.Text({
 			Text = "0:30",
-			size = 28,
-			weight = "Heavy",
-			Size = UDim2.new(1, 0, 0, 30),
-			Position = UDim2.fromOffset(0, 14),
-			Parent = timerBlock,
+			weight = "BoldItalic",
+			size = 19,
+			Position = UDim2.fromOffset(45, 16),
+			Size = UDim2.fromOffset(115, 22),
+			Parent = bar,
 		})
-		divider(row, { LayoutOrder = 2 })
 
-		-- Cash (underlined, like a price tag)
-		local cashBlock = UIKit.Frame({ Size = UDim2.fromOffset(128, 46), LayoutOrder = 3, Parent = row })
 		local cash = UIKit.Text({
 			Text = "$0",
-			size = 28,
-			weight = "Heavy",
+			weight = "Bold",
+			size = 23,
 			color = "Cash",
-			Size = UDim2.new(1, 0, 0, 34),
-			Position = UDim2.fromOffset(0, 4),
+			Position = UDim2.fromOffset(170, 5),
+			Size = UDim2.fromOffset(100, 26),
 			TextXAlignment = Enum.TextXAlignment.Center,
-			Parent = cashBlock,
+			Parent = bar,
 		})
 		UIKit.Frame({
-			BackgroundTransparency = 0.2,
+			BackgroundTransparency = 0,
 			BackgroundColor3 = Theme.Colors.Cash,
-			AnchorPoint = Vector2.new(0.5, 0),
-			Position = UDim2.new(0.5, 0, 0, 38),
-			Size = UDim2.new(0.8, 0, 0, 2),
-			Parent = cashBlock,
+			Position = UDim2.fromOffset(180, 32),
+			Size = UDim2.fromOffset(80, 2),
+			Parent = bar,
 		})
-		divider(row, { LayoutOrder = 4 })
 
-		-- Level + XP
-		local levelBlock = UIKit.Frame({ Size = UDim2.fromOffset(112, 46), LayoutOrder = 5, Parent = row })
 		local level = UIKit.Text({
 			Text = "Lv 1",
-			size = 24,
-			weight = "Heavy",
-			Size = UDim2.new(1, 0, 0, 28),
-			Position = UDim2.fromOffset(0, 2),
+			weight = "Bold",
+			size = 17,
+			Position = UDim2.fromOffset(300, 3),
+			Size = UDim2.fromOffset(120, 18),
 			TextXAlignment = Enum.TextXAlignment.Center,
-			Parent = levelBlock,
+			Parent = bar,
 		})
 		local _, xpFill = UIKit.Bar({
-			Size = UDim2.new(1, 0, 0, 7),
-			Position = UDim2.fromOffset(0, 34),
+			Position = UDim2.fromOffset(297, 23),
+			Size = UDim2.fromOffset(118, 8),
 			color = "Level",
-			Parent = levelBlock,
+			trackColor = "TrackGrey",
+			stroke = false,
+			Parent = bar,
 		})
-		divider(row, { LayoutOrder = 6 })
 
-		-- Reputation (hand-painted)
-		local repBlock = UIKit.Frame({ Size = UDim2.fromOffset(118, 46), LayoutOrder = 7, Parent = row })
 		local rep = UIKit.Brush({
 			Text = "Rep 0",
-			size = 28,
+			size = 21,
+			tilt = 0,
 			color = "Rep",
-			tilt = -3,
-			Size = UDim2.fromScale(1, 1),
+			Position = UDim2.fromOffset(440, 4),
+			Size = UDim2.fromOffset(110, 30),
 			TextXAlignment = Enum.TextXAlignment.Center,
-			Parent = repBlock,
+			Parent = bar,
+		})
+		UIKit.Frame({
+			BackgroundTransparency = 0,
+			BackgroundColor3 = Theme.Colors.Rep,
+			Position = UDim2.fromOffset(450, 33),
+			Size = UDim2.fromOffset(88, 2),
+			Parent = bar,
 		})
 
-		-- Fares (only while racing)
-		local fares = UIKit.Frame({ Size = UDim2.fromOffset(132, 46), LayoutOrder = 8, Visible = false, Parent = row })
-		divider(fares, { Position = UDim2.fromOffset(0, 6) })
-		local _, faresValue = UIKit.Stat({
-			caption = "Fares",
-			value = "$0",
-			color = "Cash",
-			Size = UDim2.new(1, -18, 1, 0),
-			Position = UDim2.fromOffset(18, 0),
+		-- Fares (only while racing): the bar grows to make room.
+		local fares = UIKit.Frame({
+			Name = "Fares",
+			Position = UDim2.fromOffset(BAR_WIDTH - 4, 0),
+			Size = UDim2.fromOffset(FARES_WIDTH, 42),
+			Visible = false,
+			Parent = bar,
+		})
+		UIKit.Text({
+			Text = "Fares",
+			weight = "Regular",
+			size = 13,
+			color = SOFT_GREY,
+			Position = UDim2.fromOffset(0, 3),
+			Size = UDim2.fromOffset(FARES_WIDTH - 16, 14),
 			Parent = fares,
 		})
+		local faresValue = UIKit.Text({
+			Text = "$0",
+			weight = "Bold",
+			size = 20,
+			color = "Cash",
+			Position = UDim2.fromOffset(0, 16),
+			Size = UDim2.fromOffset(FARES_WIDTH - 16, 22),
+			Parent = fares,
+		})
+		fares:GetPropertyChangedSignal("Visible"):Connect(function()
+			local width = fares.Visible and (BAR_WIDTH + FARES_WIDTH) or BAR_WIDTH
+			holder.Size = UDim2.fromOffset(width, 46)
+			rightTape.Position = UDim2.fromOffset(width - 8, 4)
+		end)
 
 		local _, progress = UIKit.Bar({
 			Name = "PhaseProgress",
-			Size = UDim2.new(1, 0, 0, 3),
-			Position = UDim2.new(0, 0, 1, 4),
+			Position = UDim2.new(0, 12, 0, 40),
+			Size = UDim2.new(1, -24, 0, 2),
 			color = "Mustard",
+			stroke = false,
 			Parent = bar,
 		})
 
@@ -157,7 +191,7 @@ function RouteHudBuilder.Build(playerGui)
 		hud.status = { panel = bar, phase = phase, timer = timer, fares = fares, faresValue = faresValue, progress = progress }
 
 		-- Toasts
-		local stack = UIKit.Frame({ Name = "Toasts", Size = UDim2.fromOffset(820, 130), LayoutOrder = 2, Parent = dock })
+		local stack = UIKit.Frame({ Name = "Toasts", Size = UDim2.fromOffset(760, 130), LayoutOrder = 2, Parent = dock })
 		UIKit.List(stack, { gap = 6, align = "Center" })
 
 		local order = 0
@@ -289,7 +323,7 @@ function RouteHudBuilder.Build(playerGui)
 			Parent = dock,
 		})
 		local left = UIKit.Frame({ Size = UDim2.new(1, -150, 1, 0), Parent = board })
-		local title = UIKit.Brush({ size = 30, color = "Mustard", Size = UDim2.new(1, 0, 0, 34), Parent = left })
+		local title = UIKit.Brush({ size = 30, color = "Rep", Size = UDim2.new(1, 0, 0, 34), Parent = left })
 		local subtitle = UIKit.Text({
 			size = "Small",
 			color = "TextMuted",
@@ -329,7 +363,7 @@ function RouteHudBuilder.Build(playerGui)
 			Text = "E",
 			size = 26,
 			weight = "Heavy",
-			color = "Mustard",
+			color = "Rep",
 			Size = UDim2.fromScale(1, 1),
 			TextXAlignment = Enum.TextXAlignment.Center,
 			Parent = keycap,
@@ -530,7 +564,7 @@ function RouteHudBuilder.Build(playerGui)
 			Parent = dock,
 		})
 
-		UIKit.Brush({ Text = "Route complete", size = 32, color = "Mustard", Size = UDim2.new(1, 0, 0, 38), Parent = panel })
+		UIKit.Brush({ Text = "Route complete", size = 32, color = "Rep", Size = UDim2.new(1, 0, 0, 38), Parent = panel })
 		local total = UIKit.Text({
 			size = 46,
 			weight = "Heavy",
