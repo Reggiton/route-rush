@@ -93,7 +93,7 @@ end
 
 --[[
 	An invisible anchor above a stop's ring. Clients find these by the
-	"StopMarker" tag and draw their own billboard on it (StopBillboards.lua),
+	"StopMarker" tag and list them in their own side panel (StopPanel.lua),
 	so each player sees their own drop-offs and deadlines.
 	Attributes: TrackId, StopIndex, Waiting (kept up to date by PassengerService).
 ]]

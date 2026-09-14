@@ -4,8 +4,8 @@
 	Client side of the route loop. Wires:
 	  - session phase attributes        -> status pill, countdown, ready card
 	  - ProfileUpdated remote           -> profile card (cash / level / XP / rep)
-	  - your bus appearing in the world -> drive controller, chase camera, stop billboards
-	  - RunStateUpdated / StopEvent     -> bus card, boarding card, stop billboards, toasts
+	  - your bus appearing in the world -> drive controller, chase camera, stop panel
+	  - RunStateUpdated / StopEvent     -> bus card, boarding card, stop panel, toasts
 	  - RunResults                      -> results card
 ]]
 
@@ -29,7 +29,7 @@ local Theme = UIKit.Theme
 local RouteHudBuilder = require(script.Parent.RouteHudBuilder)
 local BusDriveController = require(script.Parent.BusDriveController)
 local ChaseCamera = require(script.Parent.ChaseCamera)
-local StopBillboards = require(script.Parent.StopBillboards)
+local StopPanel = require(script.Parent.StopPanel)
 
 local Remotes = ReplicatedStorage:WaitForChild("Remotes")
 local ProfileUpdated = Remotes:WaitForChild("ProfileUpdated")
@@ -175,7 +175,7 @@ end)
 
 RunStateUpdated.OnClientEvent:Connect(function(state)
 	runState = state
-	StopBillboards.SetDrops(state.drops, os.clock())
+	StopPanel.SetRunState(state, os.clock())
 end)
 
 StopEvent.OnClientEvent:Connect(function(event)
@@ -225,7 +225,7 @@ local function detachBus()
 	runState = nil
 	BusDriveController.Stop()
 	ChaseCamera.Stop()
-	StopBillboards.Clear()
+	StopPanel.Clear()
 	setJumpEnabled(true)
 	hud.bus.panel.Visible = false
 	hud.speed.panel.Visible = false
@@ -238,7 +238,7 @@ local function attachBus(bus)
 	setJumpEnabled(false)
 	ChaseCamera.Start(bus)
 	BusDriveController.Start(bus)
-	StopBillboards.SetTrack(bus:GetAttribute("TrackId"))
+	StopPanel.SetTrack(bus:GetAttribute("TrackId"), bus)
 	hud.bus.panel.Visible = true
 	hud.speed.panel.Visible = true
 end

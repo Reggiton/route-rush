@@ -178,7 +178,7 @@ src/StarterPlayer/StarterPlayerScripts/
   RouteClient/BusDriveController.lua        arcade driving physics (client-owned)
   RouteClient/ChaseCamera.lua               follow camera
   RouteClient/BusDamageEffects.client.lua   smoke, red tint and flames on damaged buses
-  RouteClient/StopBillboards.lua            per-player stop cards: waiting, your drop-offs, deadlines
+  RouteClient/StopPanel.lua                 per-player stop list (left edge): waiting, your drop-offs, deadlines
   UI/UITheme.lua                            design tokens: colors, fonts, text sizes, radii, spacing
   UI/UIKit.lua                              UI components (panels, text, buttons, bars, stats, scaling)
   UI/Format.lua                             cash / time / count formatting
@@ -205,7 +205,7 @@ tunable number lives in a Config file.**
 | A hand-built route | add `Workspace.RouteMap` (Model); tag stop parts `RouteStop` + `Index` attribute, optional grid parts `RouteGrid` + `Index` |
 | Cross-server matchmaking | replace `BracketService.Assign()` |
 | Retime the garage swap animation | `TIMING` in `GarageSwapSequence.lua` |
-| Restyle the garage / HUD / stop cards (plain original style) | `GarageGuiBuilder.lua`, `RouteHudBuilder.lua`, `StopBillboards.lua` |
+| Restyle the garage / HUD / stop cards (plain original style) | `GarageGuiBuilder.lua`, `RouteHudBuilder.lua`, `StopPanel.lua` |
 | Resize stop bays | `RouteConfig.StopBayWidth` / `StopBayLength` / `StopGlowHeight` |
 | Upgrade names changed in the spreadsheet | regenerate `UpgradeCatalog.lua` (don't hand-edit) |
 
