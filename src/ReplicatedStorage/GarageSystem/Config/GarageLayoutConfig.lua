@@ -28,10 +28,14 @@ GarageLayoutConfig.Player = {
 	FacingDegrees = 160,
 }
 
+-- Up is the GARAGE FLOOR, not the bus's centre: the model is placed with its
+-- lowest point resting on this plane (GarageLayout.GroundModel), so every bus
+-- sits on the ground whatever its height. Raise or lower this one number to
+-- move the floor; no bus ever needs its own offset.
 GarageLayoutConfig.Bus = {
 	Forward = 3,
 	Right = -2,
-	Up = -5,
+	Up = -10,
 	FacingDegrees = 150,
 }
 

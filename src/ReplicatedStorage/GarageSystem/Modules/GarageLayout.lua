@@ -40,6 +40,34 @@ local function place(anchorCFrame, offsetCfg)
 	return CFrame.new(position)
 end
 
+--[[
+	Places a model at groundCFrame with its LOWEST point resting on that plane,
+	whatever its geometry.
+
+	Pivoting every bus to the same height does not work: a model's pivot sits
+	wherever its author put it -- at the axles, at the body centre, halfway up a
+	double-decker -- so one constant height leaves tall models floating and short
+	ones buried. Measuring the model itself means any bus, including ones added
+	later with no tuning, lands on the floor.
+
+	Call this AFTER attaching upgrade parts: they change the bounding box.
+
+	Assumes groundCFrame is yaw-only (the garage never pitches or rolls a bus),
+	so the bounding box's own height is the world-vertical height.
+]]
+function GarageLayout.GroundModel(model, groundCFrame)
+	model:PivotTo(groundCFrame)
+
+	local boxCFrame, boxSize = model:GetBoundingBox()
+	if boxSize.Y <= 0 then
+		return -- nothing to measure; leave it where the pivot put it
+	end
+
+	local bottom = boxCFrame.Position.Y - boxSize.Y / 2
+	local lift = groundCFrame.Position.Y - bottom
+	model:PivotTo(model:GetPivot() + Vector3.new(0, lift, 0))
+end
+
 function GarageLayout.Compute(anchorCFrame)
 	local camPlacement = place(anchorCFrame, GarageLayoutConfig.Camera)
 

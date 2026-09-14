@@ -396,6 +396,26 @@ check("turning it off puts every stop back on the left", (function()
 	return true
 end)())
 
+-- Garage grounding ---------------------------------------------------------------
+-- The chassis are different heights, and their pivots sit at different heights
+-- inside them, which is exactly why the garage cannot place them all at one
+-- fixed offset. This pins the root cause: if these ever became equal, a constant
+-- would work and GarageLayout.GroundModel could go. They are not equal.
+local seenRootHeight, distinctRootHeights = {}, 0
+for _, tier in ipairs(UpgradeConfig.ChassisTiers) do
+	local spec = tier.body
+	-- Transcribed from BusBuilder.buildPlaceholder: ground -> root centre.
+	local bodyHeight = spec.height * spec.decks
+	local wheelRadius = math.max(1.6, spec.width * 0.22)
+	local rootHeight = wheelRadius * 0.9 + bodyHeight / 2
+	check(tier.id .. " has a positive root height", rootHeight > 0, rootHeight)
+	if not seenRootHeight[rootHeight] then
+		seenRootHeight[rootHeight] = true
+		distinctRootHeights = distinctRootHeights + 1
+	end
+end
+check("chassis pivots sit at different heights, so one offset cannot ground them all", distinctRootHeights > 1, distinctRootHeights)
+
 -- A bay must fit inside the lane it sits in, on every layout, or it would spill
 -- across the centre line.
 for _, layout in ipairs(TrackLayouts.List) do

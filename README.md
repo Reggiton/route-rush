@@ -247,6 +247,7 @@ tunable number lives in a Config file.**
 | A hand-built route | add `Workspace.RouteMap` (Model); tag stop parts `RouteStop` + `Index` attribute, optional grid parts `RouteGrid` + `Index` |
 | Cross-server matchmaking | replace `BracketService.Assign()` |
 | Retime the garage swap animation | `TIMING` in `GarageSwapSequence.lua` |
+| Raise or lower the garage floor | `GarageLayoutConfig.Bus.Up` (buses rest their lowest point on it) |
 | Restyle the garage / HUD / stop cards (plain original style) | `GarageGuiBuilder.lua`, `RouteHudBuilder.lua`, `StopPanel.lua` |
 | Resize stop bays | `RouteConfig.StopBayWidth` / `StopBayLength` / `StopGlowHeight` |
 | Put every stop back on one side | `RouteConfig.AlternateStopSides = false` |
@@ -259,6 +260,15 @@ tunable number lives in a Config file.**
 `BusBuilder` uses real models for any tier that has them and a block
 placeholder for tiers that don't. It works for both the garage and the
 drivable bus.
+
+**You don't need to line your model up vertically.** In the garage the bus is
+placed by measuring its bounding box and resting its lowest point on the floor
+(`GarageLayout.GroundModel`), so a model sits on the ground whatever height its
+pivot happens to be at, and whatever upgrade parts are bolted onto it. Move the
+whole floor with the single number `GarageLayoutConfig.Bus.Up`; no model ever
+needs its own offset. The one thing that will throw it off is a stray part
+hanging below the wheels — an oversized hitbox or an effect emitter — because
+that becomes the lowest point.
 
 ### Rusted → pristine buses (two models per tier)
 

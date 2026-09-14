@@ -209,8 +209,10 @@ local function setDisplayBus(chassisId, levels)
 		displayBus:Destroy()
 	end
 	displayBus = BusBuilder.BuildBaseBus(chassisId, { anchored = true })
-	displayBus:PivotTo(layout.bus)
+	-- Upgrades bolt on extra parts, so ground the bus AFTER they are attached or
+	-- the measurement misses them and a bull-bar or roof rack pushes it off the floor.
 	BusUpgradeApplier.ApplyState(displayBus, levels)
+	GarageLayout.GroundModel(displayBus, layout.bus)
 	displayBus.Parent = sceneFolder
 	displayedChassisId = chassisId
 end
@@ -470,7 +472,10 @@ UpgradesConfirmed.OnClientEvent:Connect(function(garageState)
 		if displayedChassisId ~= garageState.chassisId then
 			setDisplayBus(garageState.chassisId, garageState.confirmed)
 		elseif displayBus then
+			-- Same bus, new parts bolted on: re-ground it so anything that
+			-- changed its height does not leave it hovering or sunk.
 			BusUpgradeApplier.ApplyState(displayBus, garageState.confirmed)
+			GarageLayout.GroundModel(displayBus, layout.bus)
 		end
 	end
 
