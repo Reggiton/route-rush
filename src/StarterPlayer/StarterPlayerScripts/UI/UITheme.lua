@@ -110,11 +110,11 @@ Theme.MaxScale = 3
 
 -- Uploaded image ids. File names are relative to assets/ui/.
 Theme.Images = {
-	PanelFrame = "", -- textures/panel.png
-	PaintButton = "", -- textures/button_paint.png
-	Tape = "", -- textures/tape.png
-	BrushStrip = "", -- textures/brush_strip.png
-	TopBar = "", -- textures/topbar.png
+	PanelFrame = "rbxassetid://130494582405364", -- textures/panel.png
+	PaintButton = "rbxassetid://95411330679656", -- textures/button_paint.png
+	Tape = "rbxassetid://84532661008683", -- textures/tape.png
+	BrushStrip = "rbxassetid://134489831688997", -- textures/brush_strip.png
+	TopBar = "rbxassetid://118198796171574", -- textures/topbar.png
 }
 
 -- How each texture is 9-sliced, in design pixels (the PNGs are rendered at ImageScale x).
@@ -127,18 +127,18 @@ Theme.Slices = {
 }
 
 Theme.Icons = {
-	Garage = "", -- icons/garage.png
-	Timer = "", -- icons/timer.png
-	Map = "", -- icons/map.png
-	Missions = "", -- icons/missions.png
-	Settings = "", -- icons/settings.png
-	Engine = "", -- icons/engine.png
-	Accel = "", -- icons/accel.png
-	Brakes = "", -- icons/brakes.png
-	Handles = "", -- icons/handles.png
-	Health = "", -- icons/health.png
-	Wrench = "", -- icons/wrench.png
-	Crown = "", -- icons/crown.png
+	Garage = "rbxassetid://94048184605412", -- icons/garage.png
+	Timer = "rbxassetid://76574063948559", -- icons/timer.png
+	Map = "rbxassetid://123116659137042", -- icons/map.png
+	Missions = "rbxassetid://97106781665277", -- icons/missions.png
+	Settings = "rbxassetid://133417638626148", -- icons/settings.png
+	Engine = "rbxassetid://88075541460027", -- icons/engine.png
+	Accel = "rbxassetid://134002457454580", -- icons/accel.png
+	Brakes = "rbxassetid://112414306592379", -- icons/brakes.png
+	Handles = "rbxassetid://123072122836008", -- icons/handles.png
+	Health = "rbxassetid://103905979104482", -- icons/health.png
+	Wrench = "rbxassetid://121219263663002", -- icons/wrench.png
+	Crown = "rbxassetid://79188763787140", -- icons/crown.png
 }
 
 return Theme
