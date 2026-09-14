@@ -95,8 +95,21 @@ local function buildState(player)
 		end
 	end
 
+	-- Every chassis, so the garage showroom can park each tier in its own bay
+	-- wearing its own upgrades rather than only the one being edited.
+	local fleet = {}
+	for index, chassisTier in ipairs(UpgradeConfig.ChassisTiers) do
+		local chassisEntry = data.chassis[chassisTier.id]
+		fleet[index] = {
+			chassisId = chassisTier.id,
+			owned = chassisEntry and chassisEntry.owned or false,
+			upgrades = copyLevels(chassisEntry and chassisEntry.upgrades),
+		}
+	end
+
 	return {
 		chassisId = session.chassisId,
+		fleet = fleet,
 		displayName = tier.displayName,
 		tierIndex = tierIndex,
 		tierCount = #UpgradeConfig.ChassisTiers,

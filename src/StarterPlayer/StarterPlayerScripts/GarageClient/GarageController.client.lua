@@ -1,9 +1,10 @@
 --[[
 	GarageController.client.lua
 
-	Builds a fully local, private garage scene: a cloned copy of your
-	own avatar plus a bus, positioned via GarageLayout, visible only on
-	your screen. Your REAL character just freezes in place while the menu
+	Builds a fully local, private garage showroom: a cloned copy of your
+	own avatar plus every chassis tier parked in its own bay, positioned
+	via GarageLayout, visible only on your screen. Picking a chassis pans
+	the camera to its bay. Your REAL character just freezes in place while the menu
 	is open -- nothing about the scene replicates anywhere.
 
 	The server is authoritative for levels, cash, and chassis. Every
@@ -23,11 +24,11 @@ local UpgradeConfig = require(GarageSystem.Config.UpgradeConfig)
 local BusBuilder = require(GarageSystem.Modules.BusBuilder)
 local BusUpgradeApplier = require(GarageSystem.Modules.BusUpgradeApplier)
 local GarageLayout = require(GarageSystem.Modules.GarageLayout)
+local GarageLayoutConfig = require(GarageSystem.Config.GarageLayoutConfig)
 local UpgradeCatalog = require(GarageSystem.Config.UpgradeCatalog)
 local BusStats = require(Shared.Modules.BusStats)
 local Restoration = require(Shared.Modules.Restoration)
 local GarageGuiBuilder = require(script.Parent.GarageGuiBuilder)
-local GarageSwapSequence = require(script.Parent.GarageSwapSequence)
 
 local Remotes = ReplicatedStorage:WaitForChild("Remotes")
 local OpenGarage = Remotes:WaitForChild("OpenGarage")
@@ -54,7 +55,7 @@ local swapping = false
 -- Local-only scene
 local sceneFolder
 local displayCharacter
-local displayBus
+local displayBuses = {} -- [chassisId] = parked model, one per bay
 local displayedChassisId
 local layout
 local savedCameraType
@@ -204,17 +205,81 @@ end
 
 -- Scene -------------------------------------------------------------------------------------------
 
-local function setDisplayBus(chassisId, levels)
-	if displayBus then
-		displayBus:Destroy()
+-- Which parking spot a chassis lives in: tier order, so Tier1 is bay 1.
+local function spotIndexFor(chassisId)
+	for index, tier in ipairs(UpgradeConfig.ChassisTiers) do
+		if tier.id == chassisId then
+			return index
+		end
 	end
-	displayBus = BusBuilder.BuildBaseBus(chassisId, { anchored = true })
+	return 1
+end
+
+local function spotFor(chassisId)
+	return layout and layout.spots[spotIndexFor(chassisId)]
+end
+
+-- Builds one bus into its own bay, wearing that chassis's own upgrades.
+local function setDisplayBus(chassisId, levels)
+	local spot = spotFor(chassisId)
+	if not spot then
+		return
+	end
+	local existing = displayBuses[chassisId]
+	if existing then
+		existing:Destroy()
+	end
+
+	local bus = BusBuilder.BuildBaseBus(chassisId, { anchored = true })
 	-- Upgrades bolt on extra parts, so ground the bus AFTER they are attached or
 	-- the measurement misses them and a bull-bar or roof rack pushes it off the floor.
-	BusUpgradeApplier.ApplyState(displayBus, levels)
-	GarageLayout.GroundModel(displayBus, layout.bus)
-	displayBus.Parent = sceneFolder
+	BusUpgradeApplier.ApplyState(bus, levels)
+	GarageLayout.GroundModel(bus, spot.bus)
+	bus.Parent = sceneFolder
+	displayBuses[chassisId] = bus
+end
+
+-- Slides the camera (and the avatar with it) to a chassis's bay. This replaces
+-- the old smoke-and-swap: every bus is already parked, so there is nothing to
+-- hide -- the pan itself is the transition.
+local function panToChassis(chassisId, instant)
+	local spot = spotFor(chassisId)
+	if not spot then
+		return
+	end
 	displayedChassisId = chassisId
+
+	local panTime = instant and 0 or GarageLayoutConfig.SpotPanTime
+	if panTime <= 0 then
+		camera.CFrame = spot.camera
+		if displayCharacter then
+			displayCharacter:PivotTo(spot.player)
+		end
+		return
+	end
+
+	local info = TweenInfo.new(panTime, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+	TweenService:Create(camera, info, { CFrame = spot.camera }):Play()
+
+	-- The avatar rides along so it stays beside whichever bus you are looking
+	-- at. PivotTo moves the whole rig; tweening a CFrame value drives it.
+	local character = displayCharacter
+	if character then
+		local startCFrame = character:GetPivot()
+		local alpha = Instance.new("NumberValue")
+		alpha.Value = 0
+		local connection = alpha.Changed:Connect(function(a)
+			if character.Parent then
+				character:PivotTo(startCFrame:Lerp(spot.player, a))
+			end
+		end)
+		local tween = TweenService:Create(alpha, info, { Value = 1 })
+		tween.Completed:Connect(function()
+			connection:Disconnect()
+			alpha:Destroy()
+		end)
+		tween:Play()
+	end
 end
 
 local function buildScene(garageState)
@@ -222,7 +287,7 @@ local function buildScene(garageState)
 	sceneFolder.Name = "LocalGarageScene"
 	sceneFolder.Parent = workspace
 
-	layout = GarageLayout.Compute(GarageLayout.GetAnchorCFrame())
+	layout = GarageLayout.Compute(GarageLayout.GetAnchorCFrame(), #UpgradeConfig.ChassisTiers)
 
 	-- Local-only clone of your own avatar -- never replicates anywhere.
 	-- Characters are Archivable=false by default, so :Clone() returns nil
@@ -250,11 +315,15 @@ local function buildScene(garageState)
 		if hrp then
 			hrp.Anchored = true
 		end
-		displayCharacter:PivotTo(layout.player)
+		displayCharacter:PivotTo(spotFor(garageState.chassisId).player)
 		displayCharacter.Parent = sceneFolder
 	end
 
-	setDisplayBus(garageState.chassisId, garageState.confirmed)
+	-- Park every tier in its own bay, each wearing its own confirmed upgrades.
+	for _, entry in ipairs(garageState.fleet or {}) do
+		setDisplayBus(entry.chassisId, entry.upgrades)
+	end
+	displayedChassisId = garageState.chassisId
 end
 
 local function destroyScene()
@@ -263,7 +332,7 @@ local function destroyScene()
 	end
 	sceneFolder = nil
 	displayCharacter = nil
-	displayBus = nil
+	displayBuses = {}
 	displayedChassisId = nil
 end
 
@@ -278,13 +347,6 @@ end
 local function exitGarageCamera()
 	camera.CameraType = savedCameraType or Enum.CameraType.Custom
 	savedCameraType = nil
-end
-
-local function busSmokePosition()
-	if displayBus and displayBus.PrimaryPart then
-		return displayBus.PrimaryPart.Position
-	end
-	return layout and layout.bus.Position or Vector3.zero
 end
 
 -- Open / close -------------------------------------------------------------------------------------
@@ -338,7 +400,7 @@ GarageReady.OnClientEvent:Connect(function(garageState)
 		buildScene(garageState)
 		freezeRealCharacter(true)
 		gui.panel.Visible = true
-		enterGarageCamera(layout.camera)
+		enterGarageCamera(spotFor(state.chassisId).camera)
 	end
 	render()
 	refreshOpenButton()
@@ -413,15 +475,7 @@ ChassisPreviewUpdated.OnClientEvent:Connect(function(garageState)
 		return
 	end
 
-	swapping = true
-	render()
-	local myScene = sceneFolder
-	GarageSwapSequence.SmokeSwap(busSmokePosition(), sceneFolder, function()
-		if sceneFolder == myScene and isOpen then
-			setDisplayBus(state.chassisId, state.confirmed)
-		end
-	end)
-	swapping = false
+	panToChassis(state.chassisId)
 	render()
 end)
 
@@ -461,30 +515,12 @@ UpgradesConfirmed.OnClientEvent:Connect(function(garageState)
 		return
 	end
 	state = garageState
-	swapping = true
-	render()
+	swapping = false -- the panel locks on click; the reply is what unlocks it
 
-	local myScene = sceneFolder
-	local function onHidden()
-		if sceneFolder ~= myScene or not isOpen then
-			return
-		end
-		if displayedChassisId ~= garageState.chassisId then
-			setDisplayBus(garageState.chassisId, garageState.confirmed)
-		elseif displayBus then
-			-- Same bus, new parts bolted on: re-ground it so anything that
-			-- changed its height does not leave it hovering or sunk.
-			BusUpgradeApplier.ApplyState(displayBus, garageState.confirmed)
-			GarageLayout.GroundModel(displayBus, layout.bus)
-		end
-	end
-
-	if displayCharacter and layout then
-		GarageSwapSequence.Play(displayCharacter, layout.player, layout.behind, busSmokePosition(), sceneFolder, onHidden)
-	else
-		GarageSwapSequence.SmokeSwap(busSmokePosition(), sceneFolder, onHidden)
-	end
-
-	swapping = false
+	-- Rebuilding is the simplest way to be sure removed upgrades actually come
+	-- off the model, and it re-grounds the bus for whatever the new parts did
+	-- to its height.
+	setDisplayBus(garageState.chassisId, garageState.confirmed)
+	panToChassis(garageState.chassisId)
 	render()
 end)

@@ -7,9 +7,10 @@ the garage.
 
 This repo contains the **P0 core loop** from the Build Plan:
 
-- **Garage**: a private, client-only scene. Upgrade 5 stats across 4 chassis
-  tiers, with reputation-gated slots, cash costs, a 60% refund on respec,
-  and chassis purchases.
+- **Garage**: a private, client-only showroom. Every chassis tier is parked in
+  its own bay wearing its own upgrades; picking one pans the camera to it.
+  Upgrade 5 stats across 4 chassis tiers, with reputation-gated slots, cash
+  costs, a 60% refund on respec, and chassis purchases.
 - **Player data**: cash, reputation, XP/level, and per-chassis upgrades,
   saved to DataStores with session locking.
 - **Route sessions**: server-wide rounds (intermission → countdown → 5-minute
@@ -176,13 +177,13 @@ src/ReplicatedStorage/
   GarageSystem/
     Config/UpgradeConfig.lua         categories, max level, chassis tiers (stats, prices, body shapes)
     Config/UpgradeCatalog.lua        GENERATED names/visuals for all 180 upgrades (from the spreadsheet)
-    Config/GarageLayoutConfig.lua    garage camera/player/bus/behind offsets
+    Config/GarageLayoutConfig.lua    garage camera/player/bus/behind offsets + bay spacing
     Config/RestorationConfig.lua     which upgrade unrusts which part of the bus, at which levels
     Modules/BusRestoration.lua       swaps rusted parts for pristine ones on a built bus
     Modules/BusBuilder.lua           builds a tier's bus: Root + visuals + one Attachment per category
     Modules/BusUpgradeApplier.lua    welds/unwelds upgrade models onto a bus
     Modules/UpgradeModelProvider.lua (category, level) -> Model  (placeholder blocks)
-    Modules/GarageLayout.lua         anchor CFrame -> camera/player/bus/behind CFrames
+    Modules/GarageLayout.lua         anchor CFrame -> per-bay camera/player/bus CFrames, model grounding
   Shared/
     Config/EconomyConfig.lua         cash, slot prices, rep thresholds, XP curve, run rewards
     Config/DrivingConfig.lua         upgrade gains, load penalties, controller + collision tuning
@@ -212,9 +213,9 @@ src/ServerScriptService/
   RouteServer/ReadyService.lua              who is Ready (player attribute), SetReady remote
 
 src/StarterPlayer/StarterPlayerScripts/
-  GarageClient/GarageController.client.lua  local garage scene + GUI wiring
+  GarageClient/GarageController.client.lua  local garage showroom + camera pan + GUI wiring
   GarageClient/GarageGuiBuilder.lua         builds the garage GUI
-  GarageClient/GarageSwapSequence.lua       jump / smoke / swap animation
+  GarageClient/GarageSwapSequence.lua       jump / smoke / swap animation (UNUSED: the camera pan replaced it)
   RouteClient/RouteClient.client.lua        HUD, boarding, results, starts driving + camera
   RouteClient/RouteHudBuilder.lua           builds the route HUD
   RouteClient/BusDriveController.lua        arcade driving physics (client-owned)
@@ -246,7 +247,8 @@ tunable number lives in a Config file.**
 | A real lobby | add `Workspace.Lobby` with a SpawnLocation |
 | A hand-built route | add `Workspace.RouteMap` (Model); tag stop parts `RouteStop` + `Index` attribute, optional grid parts `RouteGrid` + `Index` |
 | Cross-server matchmaking | replace `BracketService.Assign()` |
-| Retime the garage swap animation | `TIMING` in `GarageSwapSequence.lua` |
+| Space out the garage bays | `GarageLayoutConfig.SpotSpacing` (studs between bay centres; negative flips the row) |
+| Retime the bay-to-bay camera pan | `GarageLayoutConfig.SpotPanTime` |
 | Raise or lower the garage floor | `GarageLayoutConfig.Bus.Up` (buses rest their lowest point on it) |
 | Restyle the garage / HUD / stop cards (plain original style) | `GarageGuiBuilder.lua`, `RouteHudBuilder.lua`, `StopPanel.lua` |
 | Resize stop bays | `RouteConfig.StopBayWidth` / `StopBayLength` / `StopGlowHeight` |
