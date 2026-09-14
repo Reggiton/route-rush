@@ -82,8 +82,10 @@ will need a tuning pass.
    - Stop, Play again: purchases persist (needs API access).
 3. **Round.** `/skip` to start. Countdown shows you seated in your bus on the grid,
    and the garage closes. At GO:
-   - Drive to a yellow stop zone, stop, and board N with E. Handling gets
-     worse as load rises.
+   - Drive to a yellow stop zone and board with E without stopping. Check the
+     speed tiers on the speedometer: roll through at ~30 mph and you get 2,
+     brake to ~20 for 4, crawl at ~10 for the whole crowd, and above 30 mph
+     nobody boards or gets off. Handling gets worse as load rises.
    - Deliver passengers: a "+$" toast, and on-time bonuses before the deadline.
    - Ram an obstacle: HP drops. At 0 you break down and lose passengers.
    - `/skip` to end: results screen with cash/rep/XP, respawn in the lobby, and

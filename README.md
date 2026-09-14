@@ -85,21 +85,34 @@ Intermission (30s) ──► Countdown (5s) ──► Running (300s) ──► R
 - **Stops:** every stop is a glowing rectangular bay in the left lane. Steer
   the bus into it (it's narrower than the road). You don't have to stop:
   - **Boarding:** drive through and press or hold **E** to board passengers.
-    The slower you're going, the faster they get on, and a full stop is
-    fastest. Above 50 studs/s nobody boards. A quick drive-by grabs a
-    couple; stopping takes the whole crowd. It's a trade-off: more
-    passengers per stop, or more stops.
+    Your speed through the bay sets how many you may pick up there:
+
+    | Speed | You can pick up |
+    | --- | --- |
+    | 30 mph or under | 2 |
+    | 20 mph or under | 4 |
+    | 10 mph or under | as many as the bus will hold |
+    | over 30 mph | nobody |
+
+    The cap counts everyone boarded during that visit, so you can take 2 at
+    30, brake to 20 and take 2 more. That's the trade-off: blast through at
+    30 when you only need to shed one passenger, or slow right down and pay
+    the time to fill the bus.
   - **Waiting passengers:** each stop still has a limited queue that refills
     over time.
   - **Drop-offs:** passengers for that stop get off automatically while you're
-    in the ring below 50 studs/s. They pay `FareBase + FarePerStop × stops
+    in the bay at 30 mph or under. They pay `FareBase + FarePerStop × stops
     travelled`, plus 25% if delivered before their deadline.
+  - **Speedometer:** the bottom-right dial reads in mph, and its tick marks
+    are coloured by those tiers, so you can see what the bay is worth at your
+    current speed without doing the arithmetic.
   - All of this is tunable in `RouteConfig.lua` → *Boarding on the move*.
-  - **Stop cards:** a card floats above every stop on your track, visible
-    only to you. It shows how many people are waiting, how many of *your*
-    passengers get off there, and a live countdown to their deadline
-    (amber when close, red when late). Stops with drop-offs show through
-    walls, and the most urgent one gets a yellow border.
+  - **Stop list:** the left edge of the screen lists the stops coming up on
+    your track, visible only to you: how many people are waiting, how far
+    away each one is, how many of *your* passengers get off there, and a
+    live countdown to their deadline (amber when close, red when late).
+    Stops you owe a drop-off to stay listed even once you've passed them,
+    and the most urgent one gets a yellow border.
 - **Load:** each passenger pushes the bus toward the full-load penalties
   (−15% top speed, −35% accel, −30% brakes, −40% grip). Handles upgrades
   soften the grip penalty.

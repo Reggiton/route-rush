@@ -10,9 +10,14 @@
 	  top-left       Leave race button (in a race)
 	  bottom-left    Ready card (lobby) / bus panel (in a race)
 	  bottom-center  boarding panel (inside a stop bay)
-	  bottom-right   speed
+	  bottom-right   speedometer (mph dial, ticks banded by boarding tier)
 	  center         countdown, results
 ]]
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Boarding = require(Shared.Modules.Boarding)
 
 local RouteHudBuilder = {}
 
@@ -243,28 +248,109 @@ function RouteHudBuilder.Build(playerGui)
 		}
 	end
 
-	-- Speed (bottom-right) ----------------------------------------------------------------------------------
+	-- Speedometer (bottom-right) ----------------------------------------------------------------------------
+	-- A real dial in mph. The tick marks are coloured by the boarding tiers from
+	-- RouteConfig, so the gauge shows at a glance how slow you need to be to pick
+	-- up 2, 4, or the whole crowd.
 	do
-		local panel = frame(screenGui, "Speed", UDim2.fromOffset(180, 110), UDim2.new(1, -200, 1, -130), {
+		local PANEL_W, PANEL_H = 190, 212
+		local DIAL = 168
+		local START_ANGLE, END_ANGLE = -125, 125
+		local MAX_MPH = 100
+		local TICK_STEP, LABEL_STEP = 10, 20
+		local TICK_RADIUS, LABEL_RADIUS, NEEDLE_LENGTH = 74, 55, 48
+
+		local panel = frame(screenGui, "Speed", UDim2.fromOffset(PANEL_W, PANEL_H), UDim2.new(1, -PANEL_W - 20, 1, -PANEL_H - 20), {
 			BackgroundTransparency = 0.15,
 			Visible = false,
 		})
-		corner(panel)
-		local value = label(panel, "Value", "0", UDim2.fromOffset(156, 60), UDim2.fromOffset(12, 6), {
+		corner(panel, 14)
+
+		local dial = frame(panel, "Dial", UDim2.fromOffset(DIAL, DIAL), UDim2.new(0.5, 0, 0, 8), {
+			AnchorPoint = Vector2.new(0.5, 0),
+			BackgroundTransparency = 1,
+		})
+
+		local function angleFor(mph)
+			return START_ANGLE + math.clamp(mph / MAX_MPH, 0, 1) * (END_ANGLE - START_ANGLE)
+		end
+
+		-- Sit a child on the dial face. Angle 0 is straight up and grows
+		-- clockwise; the child is rotated to line up radially.
+		local function place(instance, angle, radius)
+			local radians = math.rad(angle - 90)
+			instance.AnchorPoint = Vector2.new(0.5, 0.5)
+			instance.Position = UDim2.new(0.5, math.cos(radians) * radius, 0.5, math.sin(radians) * radius)
+			instance.Rotation = angle
+		end
+
+		local tiers = Boarding.TiersBySpeed() -- slowest (most generous) first
+		local BANDS = { GREEN, YELLOW, ORANGE }
+		local function tickColor(mph)
+			for i, tier in ipairs(tiers) do
+				if mph <= tier.mph then
+					return BANDS[math.min(i, #BANDS)]
+				end
+			end
+			return Color3.fromRGB(120, 120, 130)
+		end
+
+		for mph = 0, MAX_MPH, TICK_STEP do
+			local major = mph % LABEL_STEP == 0
+			local tick = frame(dial, "Tick" .. mph, UDim2.fromOffset(major and 3 or 2, major and 13 or 8), UDim2.new(), {
+				BackgroundColor3 = tickColor(mph),
+				BackgroundTransparency = major and 0 or 0.35,
+			})
+			place(tick, angleFor(mph), TICK_RADIUS)
+
+			if major then
+				local mark = label(dial, "Mark" .. mph, tostring(mph), UDim2.fromOffset(26, 13), UDim2.new(), {
+					TextColor3 = MUTED,
+					Font = Enum.Font.Gotham,
+				})
+				place(mark, angleFor(mph), LABEL_RADIUS)
+				mark.Rotation = 0 -- numbers stay upright
+			end
+		end
+
+		local needle = frame(dial, "Needle", UDim2.fromOffset(3, NEEDLE_LENGTH), UDim2.fromScale(0.5, 0.5), {
+			AnchorPoint = Vector2.new(0.5, 1),
+			BackgroundColor3 = RED,
+		})
+		corner(needle, 2)
+		needle.Rotation = START_ANGLE
+
+		local hub = frame(dial, "Hub", UDim2.fromOffset(14, 14), UDim2.fromScale(0.5, 0.5), {
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			BackgroundColor3 = Color3.fromRGB(70, 70, 78),
+		})
+		corner(hub, 7)
+
+		local value = label(panel, "Value", "0", UDim2.fromOffset(70, 26), UDim2.new(0.5, -42, 0, 174), {
 			TextXAlignment = Enum.TextXAlignment.Right,
 			Font = Enum.Font.GothamBlack,
 		})
-		label(panel, "Unit", "studs/s", UDim2.fromOffset(156, 16), UDim2.fromOffset(12, 66), {
-			TextXAlignment = Enum.TextXAlignment.Right,
+		label(panel, "Unit", "MPH", UDim2.fromOffset(36, 14), UDim2.new(0.5, 32, 0, 182), {
+			TextXAlignment = Enum.TextXAlignment.Left,
 			TextColor3 = MUTED,
 			Font = Enum.Font.Gotham,
 		})
-		local sliding = label(panel, "Sliding", "SLIDING", UDim2.fromOffset(80, 18), UDim2.fromOffset(12, 86), {
-			TextXAlignment = Enum.TextXAlignment.Left,
+		local sliding = label(panel, "Sliding", "SLIDING", UDim2.new(1, -20, 0, 13), UDim2.new(0, 10, 0, 194), {
 			TextColor3 = ORANGE,
 			Visible = false,
 		})
-		hud.speed = { panel = panel, value = value, sliding = sliding }
+
+		local speed = { panel = panel, needle = needle, value = value, sliding = sliding }
+
+		function speed.set(mph)
+			needle.Rotation = angleFor(mph)
+			local rounded = tostring(math.floor(mph + 0.5))
+			if value.Text ~= rounded then
+				value.Text = rounded
+			end
+		end
+
+		hud.speed = speed
 	end
 
 	-- Boarding panel (bottom-center) --------------------------------------------------------------------------
@@ -283,7 +369,7 @@ function RouteHudBuilder.Build(playerGui)
 			TextColor3 = MUTED,
 			Font = Enum.Font.Gotham,
 		})
-		label(panel, "RateCaption", "Boarding rate", UDim2.fromOffset(222, 14), UDim2.fromOffset(10, 54), {
+		label(panel, "RateCaption", "Room at this speed", UDim2.fromOffset(222, 14), UDim2.fromOffset(10, 54), {
 			TextXAlignment = Enum.TextXAlignment.Left,
 			TextColor3 = MUTED,
 			Font = Enum.Font.Gotham,

@@ -203,21 +203,44 @@ eq("two-slice sweep back", Restoration.ThresholdFor({ levels = { 2, 8 }, sweep =
 -- Boarding on the move
 local Boarding = require(RS.Shared.Modules.Boarding)
 local RouteConfig = require(RS.Shared.Config.RouteConfig)
-eq("stopped = full slowness", Boarding.Slowness(0), 1)
-eq("at max board speed = no slowness", Boarding.Slowness(RouteConfig.MaxBoardSpeed), 0)
-eq("way too fast = no slowness", Boarding.Slowness(500), 0)
-eq("no boarding at max speed", Boarding.RatePerSecond(RouteConfig.MaxBoardSpeed), 0)
-check("can't board at max speed", not Boarding.CanBoard(RouteConfig.MaxBoardSpeed))
-check("can board when slow", Boarding.CanBoard(RouteConfig.MaxBoardSpeed - 1))
-eq("full stop rate", Boarding.RatePerSecond(0), RouteConfig.BoardRateMax * RouteConfig.FullStopBonus)
-local previousRate = math.huge
-for speed = 0, RouteConfig.MaxBoardSpeed + 10, 2 do
-	local rate = Boarding.RatePerSecond(speed)
-	check("slower boards faster (" .. speed .. ")", rate <= previousRate, rate)
-	previousRate = rate
+local mph = Boarding.Studs -- mph -> studs/s, the unit the game measures in
+
+eq("mph round-trips through studs", Boarding.Mph(Boarding.Studs(37)), 37)
+eq("zero is zero mph", Boarding.Mph(0), 0)
+
+-- The three tiers, checked at their exact thresholds (inclusive) and just over.
+eq("30 mph picks up 2", Boarding.BoardCap(mph(30)), 2)
+eq("just over 30 picks up nobody", Boarding.BoardCap(mph(30.1)), 0)
+eq("20 mph picks up 4", Boarding.BoardCap(mph(20)), 4)
+eq("25 mph is still the 30 tier", Boarding.BoardCap(mph(25)), 2)
+eq("10 mph takes the whole crowd", Boarding.BoardCap(mph(10)), math.huge)
+eq("a full stop takes the whole crowd", Boarding.BoardCap(0), math.huge)
+
+check("cannot board way too fast", not Boarding.CanBoard(mph(60)))
+check("can board at the top tier", Boarding.CanBoard(mph(30)))
+check("drop-offs happen at 30", Boarding.CanDropOff(mph(30)))
+check("no drop-offs over 30", not Boarding.CanDropOff(mph(31)))
+eq("fastest boarding speed", Boarding.MaxBoardMph(), 30)
+
+-- Slowing down must never cost you capacity.
+local previousCap = -1
+for speedMph = 40, 0, -1 do
+	local cap = Boarding.BoardCap(mph(speedMph))
+	check("slower never boards less (" .. speedMph .. " mph)", cap >= previousCap, cap)
+	previousCap = cap
 end
-check("stopping beats rolling", Boarding.RatePerSecond(0) > Boarding.RatePerSecond(RouteConfig.FullStopSpeed + 1))
-check("half speed boards less than half as fast (curve)", Boarding.RatePerSecond((RouteConfig.MaxBoardSpeed + RouteConfig.FullStopSpeed) / 2) < RouteConfig.BoardRateMax * 0.5)
+
+-- NextTier points at the least slowing down that actually buys you something.
+eq("next tier from 30 is 20", Boarding.NextTier(mph(30)).mph, 20)
+eq("next tier from 25 is 20", Boarding.NextTier(mph(25)).mph, 20)
+eq("next tier from 20 is 10", Boarding.NextTier(mph(20)).mph, 10)
+eq("next tier from 50 is 30", Boarding.NextTier(mph(50)).mph, 30)
+check("no tier below the slowest", Boarding.NextTier(mph(5)) == nil)
+
+local sorted = Boarding.TiersBySpeed()
+eq("tiers sort slowest first", sorted[1].mph, 10)
+eq("tiers sort fastest last", sorted[#sorted].mph, 30)
+check("sorting does not mutate the config", RouteConfig.BoardTiers[1].mph == 30)
 
 print(string.format("%d passed, %d failed", passes, failures))
 if failures > 0 then

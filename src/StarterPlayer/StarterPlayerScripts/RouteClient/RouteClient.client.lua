@@ -98,8 +98,8 @@ end)
 
 -- Boarding card --------------------------------------------------------------------------------------
 
--- Shown while your bus is inside a stop's ring. Boarding speed depends on how
--- slow you're going (Boarding.lua); the server decides how many actually board.
+-- Shown while your bus is inside a stop's ring. Your speed sets the cap on how
+-- many you may pick up during this visit (Boarding.lua); the server enforces it.
 local function renderBoardCard(phase, speed)
 	local board = hud.board
 	local visible = myBus ~= nil and runState ~= nil and runState.atStop > 0 and phase == "Running"
@@ -108,26 +108,43 @@ local function renderBoardCard(phase, speed)
 		return
 	end
 
-	local rateFraction = math.clamp(Boarding.RatePerSecond(speed) / math.max(Boarding.RatePerSecond(0), 1e-6), 0, 1)
+	local cap = Boarding.BoardCap(speed)
+	local boarded = runState.boardedThisStop or 0
+	local room = math.max(0, cap - boarded)
+	local unlimited = cap == math.huge
+
+	-- The meter is what this pass still has left in it, not a rate.
+	local roomFraction = 0
+	if unlimited then
+		roomFraction = 1
+	elseif cap > 0 then
+		roomFraction = math.clamp(room / cap, 0, 1)
+	end
+
 	board.title.Text = "STOP " .. runState.atStop
 	board.subtitle.Text = string.format("%d waiting  ·  %s free", runState.waitingAtStop, Format.Count(runState.seatsLeft, "seat"))
-	UIKit.SetFill(board.rateFill, rateFraction, Theme.Colors.Negative:Lerp(Theme.Colors.Positive, rateFraction))
-	board.boardedCount.Text = string.format("%d BOARDED", runState.boardedThisStop or 0)
+	UIKit.SetFill(board.rateFill, roomFraction, Theme.Colors.Negative:Lerp(Theme.Colors.Positive, roomFraction))
+	board.boardedCount.Text = string.format("%d BOARDED", boarded)
 
-	local canBoard = runState.waitingAtStop > 0 and runState.seatsLeft > 0 and Boarding.CanBoard(speed)
+	local canBoard = runState.waitingAtStop > 0 and runState.seatsLeft > 0 and room > 0
 	board.button.Interactable = canBoard
 
+	local nextTier = Boarding.NextTier(speed)
 	local hint, tone
 	if runState.seatsLeft == 0 then
 		hint, tone = "Bus is full", "Warning"
 	elseif runState.waitingAtStop == 0 then
 		hint, tone = "Nobody waiting here", "TextMuted"
-	elseif not Boarding.CanBoard(speed) then
-		hint, tone = string.format("Too fast — slow below %d to board", RouteConfig.MaxBoardSpeed), "Negative"
-	elseif Boarding.IsStopped(speed) then
-		hint, tone = "Stopped — fastest boarding", "Positive"
+	elseif cap <= 0 then
+		hint, tone = string.format("Too fast — get under %d mph", Boarding.MaxBoardMph()), "Negative"
+	elseif room <= 0 and nextTier then
+		hint, tone = string.format("Slow to %d mph for more", nextTier.mph), "Warning"
+	elseif room <= 0 then
+		hint, tone = "That's everyone this pass", "TextMuted"
+	elseif unlimited then
+		hint, tone = "Slow enough for the whole crowd", "Positive"
 	else
-		hint, tone = "Spam or hold E · slower = more passengers", "Text"
+		hint, tone = string.format("Spam or hold E · room for %d more", room), "Text"
 	end
 	board.hint.Text = hint
 	board.hint.TextColor3 = Theme.Colors[tone]
@@ -380,7 +397,7 @@ RunService.RenderStepped:Connect(function()
 		return
 	end
 
-	hud.speed.value.Text = tostring(math.floor(speed))
+	hud.speed.set(Boarding.Mph(speed))
 	hud.speed.sliding.Visible = telemetry ~= nil and telemetry.sliding
 
 	local card = hud.bus
