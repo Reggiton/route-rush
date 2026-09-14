@@ -367,6 +367,44 @@ eq("two-column grid, left slot unchanged", gridLateral(0, 2, 28), -7)
 eq("two-column grid, right slot unchanged", gridLateral(1, 2, 28), 7)
 eq("four-column grid is centred", gridLateral(0, 4, 56) + gridLateral(3, 4, 56), 0)
 
+-- Stops alternate kerbs. Mirrors TrackBuilder's rule so a change there without a
+-- change here shows up; -1 is the left kerb, the side everything used to be on.
+local function stopSide(index, alternating)
+	return (alternating and index % 2 == 0) and 1 or -1
+end
+eq("stop 1 stays on the left", stopSide(1, true), -1)
+eq("stop 2 crosses to the right", stopSide(2, true), 1)
+eq("stop 3 is back on the left", stopSide(3, true), -1)
+eq("stop 8 is on the right", stopSide(8, true), 1)
+check("alternating uses both kerbs", (function()
+	local left, right = 0, 0
+	for index = 1, RouteConfig.StopCount do
+		if stopSide(index, true) < 0 then
+			left = left + 1
+		else
+			right = right + 1
+		end
+	end
+	return left > 0 and right > 0 and left + right == RouteConfig.StopCount
+end)())
+check("turning it off puts every stop back on the left", (function()
+	for index = 1, RouteConfig.StopCount do
+		if stopSide(index, false) ~= -1 then
+			return false
+		end
+	end
+	return true
+end)())
+
+-- A bay must fit inside the lane it sits in, on every layout, or it would spill
+-- across the centre line.
+for _, layout in ipairs(TrackLayouts.List) do
+	local laneCentre = layout.roadWidth / 4
+	local bayHalf = RouteConfig.StopBayWidth / 2
+	check(layout.id .. " bay stays inside its lane", bayHalf <= laneCentre, bayHalf .. " vs " .. laneCentre)
+	check(layout.id .. " bay does not cross the centre line", laneCentre - bayHalf >= 0)
+end
+
 print(string.format("%d passed, %d failed", passes, failures))
 if failures > 0 then
 	error("tests failed")

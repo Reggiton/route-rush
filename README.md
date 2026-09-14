@@ -106,8 +106,10 @@ Intermission (30s) ──► Countdown (5s) ──► Running (300s) ──► R
   - Ready players stay Ready round after round. Racers who sat idle for a
     whole race (barely drove, delivered nobody) are set back to Not Ready.
   - All of this is tunable in `RouteConfig.lua` → *Ready-up*.
-- **Stops:** every stop is a glowing rectangular bay in the left lane. Steer
-  the bus into it (it's narrower than the road). You don't have to stop:
+- **Stops:** every stop is a glowing rectangular bay against one kerb, and the
+  stops **alternate sides** — odd on the left, even on the right — so a lap
+  means weaving across the road rather than hugging one side. Steer the bus
+  into the bay (it's narrower than the lane). You don't have to stop:
   - **Boarding:** drive through and press or hold **E** to board passengers.
     Your speed through the bay sets how many you may pick up there:
 
@@ -133,8 +135,9 @@ Intermission (30s) ──► Countdown (5s) ──► Running (300s) ──► R
   - All of this is tunable in `RouteConfig.lua` → *Boarding on the move*.
   - **Stop list:** the left edge of the screen lists the stops coming up on
     your track, visible only to you: how many people are waiting, how far
-    away each one is, how many of *your* passengers get off there, and a
-    live countdown to their deadline (amber when close, red when late).
+    away each one is, **which kerb it's on**, how many of *your* passengers
+    get off there, and a live countdown to their deadline (amber when close,
+    red when late).
     Stops you owe a drop-off to stay listed even once you've passed them,
     and the most urgent one gets a yellow border.
 - **Load:** each passenger pushes the bus toward the full-load penalties
@@ -246,6 +249,7 @@ tunable number lives in a Config file.**
 | Retime the garage swap animation | `TIMING` in `GarageSwapSequence.lua` |
 | Restyle the garage / HUD / stop cards (plain original style) | `GarageGuiBuilder.lua`, `RouteHudBuilder.lua`, `StopPanel.lua` |
 | Resize stop bays | `RouteConfig.StopBayWidth` / `StopBayLength` / `StopGlowHeight` |
+| Put every stop back on one side | `RouteConfig.AlternateStopSides = false` |
 | Add a track layout to the vote | `TrackLayouts.lua` (one table entry + a `points()` returning a closed ring) |
 | Retune the off-road tow penalty | `DrivingConfig.OffRoad` |
 | Upgrade names changed in the spreadsheet | regenerate `UpgradeCatalog.lua` (don't hand-edit) |

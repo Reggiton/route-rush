@@ -51,13 +51,14 @@ RouteConfig.HillAmplitude = 55 -- studs of climb/descent on the Hill Circuit lay
 
 -- Stops & passengers ------------------------------------------------------------------
 RouteConfig.StopCount = 8
--- Each stop is a glowing rectangular bay in the left lane. A bus is "at the stop"
+-- Each stop is a glowing rectangular bay against one kerb. A bus is "at the stop"
 -- while its center is inside the bay -- it's narrower than the road, so drivers
--- have to steer into it.
+-- have to steer into it. Stops alternate sides, so you cross the road each time.
 RouteConfig.StopBayWidth = 12 -- studs across (one lane is RoadWidth / 2 = 14)
 RouteConfig.StopBayLength = 34 -- studs along the road
 RouteConfig.StopBayMargin = 1.5 -- extra tolerance around the bay edges (studs)
 RouteConfig.StopGlowHeight = 2.5 -- low light walls along the bay's sides (0 = none)
+RouteConfig.AlternateStopSides = true -- odd stops on the left kerb, even on the right
 
 -- Boarding on the move ------------------------------------------------------------------
 -- You never have to stop. How fast you are rolling through a bay decides whether

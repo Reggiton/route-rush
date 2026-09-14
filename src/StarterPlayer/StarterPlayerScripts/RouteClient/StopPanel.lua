@@ -6,7 +6,7 @@
 
 	    NEXT STOPS
 	    STOP 3               120 studs
-	    8 waiting
+	    8 waiting                 LEFT
 	    Drop off 2 · 0:19
 
 	Rows are the stops ahead of the bus, nearest first, plus any stop you are
@@ -123,10 +123,17 @@ local function buildRow(order)
 		TextColor3 = MUTED,
 		Font = Enum.Font.Gotham,
 	})
-	local waiting = label(row, "Waiting", "0 waiting", UDim2.fromOffset(PANEL_WIDTH - 40, 13), UDim2.fromOffset(10, 23), {
+	local waiting = label(row, "Waiting", "0 waiting", UDim2.fromOffset(120, 13), UDim2.fromOffset(10, 23), {
 		TextXAlignment = Enum.TextXAlignment.Left,
 		TextColor3 = MUTED,
 		Font = Enum.Font.Gotham,
+	})
+	-- Which kerb the bay is against. Stops alternate, so this is the difference
+	-- between pulling in and driving straight past.
+	local side = label(row, "Side", "", UDim2.fromOffset(94, 13), UDim2.fromOffset(PANEL_WIDTH - 124, 23), {
+		TextXAlignment = Enum.TextXAlignment.Right,
+		TextColor3 = YELLOW,
+		Font = Enum.Font.GothamBold,
 	})
 
 	local drop = label(row, "Drop", "", UDim2.new(1, -20, 0, 18), UDim2.fromOffset(10, 38), {
@@ -147,6 +154,7 @@ local function buildRow(order)
 		title = title,
 		distance = distance,
 		waiting = waiting,
+		side = side,
 		drop = drop,
 	}
 end
@@ -272,7 +280,11 @@ local function refresh(now)
 			widgets.row.Visible = false
 		else
 			widgets.row.Visible = true
+			-- Stops alternate kerbs, so which side this one is on matters as much
+			-- as how far away it is: you have to be in that lane to pull in.
+			local side = (entry.marker:GetAttribute("Side") or -1) >= 0 and "RIGHT" or "LEFT"
 			setText(widgets.title, "STOP " .. entry.index)
+			setText(widgets.side, side)
 			setText(widgets.waiting, (entry.marker:GetAttribute("Waiting") or 0) .. " waiting")
 			setText(widgets.distance, entry.index == atStopIndex and "here" or string.format("%d studs", entry.distance))
 			widgets.outline.Enabled = entry.index == urgentIndex
