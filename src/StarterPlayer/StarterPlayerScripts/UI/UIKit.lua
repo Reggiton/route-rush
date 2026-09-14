@@ -129,22 +129,40 @@ local function grime(parent, strength)
 	return gradient
 end
 
-local function textureBehind(parent, imageId, padding)
-	if not imageId or imageId == "" then
-		return
+-- True if an image slot (Theme.Images key) has an uploaded id.
+function UIKit.HasImage(slot)
+	local id = Theme.Images[slot]
+	return id ~= nil and id ~= ""
+end
+
+-- Fills `parent` with a 9-sliced texture from Theme.Images[slot] (behind its children,
+-- ignoring the parent's padding). sliceScale (default 1) shrinks the texture's edges for
+-- small elements. Returns the ImageLabel, or nil if the slot is empty.
+local function sliceImage(parent, slot, padding, sliceScale)
+	if not UIKit.HasImage(slot) then
+		return nil
 	end
 	local top, right, bottom, left = paddingOf(padding)
 	local image = Instance.new("ImageLabel")
-	image.Name = "Texture"
+	image.Name = slot
 	image.BackgroundTransparency = 1
-	image.Image = imageId
-	image.ScaleType = Enum.ScaleType.Slice
-	image.SliceCenter = Theme.Images.PanelSliceCenter
+	image.Image = Theme.Images[slot]
+	local center = Theme.Slices[slot]
+	if center then
+		local s = Theme.ImageScale
+		image.ScaleType = Enum.ScaleType.Slice
+		image.SliceCenter = Rect.new(center.Min.X * s, center.Min.Y * s, center.Max.X * s, center.Max.Y * s)
+		image.SliceScale = (1 / s) * (sliceScale or 1)
+	else
+		image.ScaleType = Enum.ScaleType.Stretch
+	end
 	image.Size = UDim2.new(1, left + right, 1, top + bottom)
 	image.Position = UDim2.fromOffset(-left, -top)
 	image.ZIndex = 0
 	image.Parent = parent
+	return image
 end
+UIKit.SliceImage = sliceImage
 
 -- Building blocks -------------------------------------------------------------------------------
 
@@ -221,20 +239,24 @@ function UIKit.Panel(props)
 	panel.BackgroundTransparency = props.transparency or (tone == "Panel" and 0.04 or 0)
 	apply(panel, props)
 
-	UIKit.Corner(panel, props.radius or Theme.Radius.Large)
-	if props.stroke ~= false then
-		UIKit.Stroke(panel, {
-			color = tone == "Row" and "RowEdge" or "PanelEdge",
-			transparency = tone == "Row" and 0.35 or 0.15,
-			thickness = tone == "Row" and 1 or 2,
-		})
+	-- Textured version (uploaded image) or the code-drawn fallback.
+	local slot = props.image or (tone == "Panel" and "PanelFrame" or nil)
+	if slot and UIKit.HasImage(slot) then
+		panel.BackgroundTransparency = 1
+		sliceImage(panel, slot, props.padding, props.sliceScale)
+	else
+		UIKit.Corner(panel, props.radius or Theme.Radius.Large)
+		if props.stroke ~= false then
+			UIKit.Stroke(panel, {
+				color = tone == "Row" and "RowEdge" or "PanelEdge",
+				transparency = tone == "Row" and 0.35 or 0.15,
+				thickness = tone == "Row" and 1 or 2,
+			})
+		end
+		grime(panel, tone == "Panel" and 0.22 or 0.12)
 	end
-	grime(panel, tone == "Panel" and 0.22 or 0.12)
 	if props.padding then
 		UIKit.Padding(panel, props.padding)
-	end
-	if tone == "Panel" then
-		textureBehind(panel, Theme.Images.PanelTexture, props.padding)
 	end
 	for _, corner in ipairs(props.tape or {}) do
 		UIKit.Tape(panel, corner, props.padding)
@@ -302,6 +324,7 @@ local VARIANTS = {
 	-- hardware
 	secondary = { bg = "Row", text = "Text", font = "Bold", edge = "RowEdge" },
 	ghost = { bg = "Inset", text = "Text", font = "Bold", edge = "PanelEdge" },
+	key = { bg = "Key", text = "Text", font = "Bold", edge = "KeyEdge" },
 }
 
 --[[
@@ -322,6 +345,7 @@ function UIKit.Button(props)
 	apply(button, props)
 	UIKit.Corner(button, props.radius or Theme.Radius.Small)
 
+	local paintImage
 	if variant.paint then
 		button.Rotation = props.tilt or -0.8
 		-- uneven brush streaks + frayed ends
@@ -342,17 +366,13 @@ function UIKit.Button(props)
 			NumberSequenceKeypoint.new(1, 0.3),
 		})
 		streaks.Parent = button
-		UIKit.Stroke(button, { color = "MustardDark", transparency = 0.45, thickness = 2 })
-		if Theme.Images.Brush ~= "" then
-			local brush = Instance.new("ImageLabel")
-			brush.Name = "Brush"
-			brush.BackgroundTransparency = 1
-			brush.Image = Theme.Images.Brush
-			brush.ScaleType = Enum.ScaleType.Stretch
-			brush.Size = UDim2.fromScale(1, 1)
-			brush.ZIndex = 0
-			brush.Parent = button
-			button.BackgroundTransparency = 1
+		local paintStroke = UIKit.Stroke(button, { color = "MustardDark", transparency = 0.45, thickness = 2 })
+		-- The uploaded mustard paint texture replaces the code-drawn streaks.
+		if variantName == "primary" and UIKit.HasImage("PaintButton") then
+			streaks:Destroy()
+			paintStroke:Destroy()
+			button.Rotation = props.tilt or 0
+			paintImage = sliceImage(button, "PaintButton")
 		end
 	else
 		UIKit.Stroke(button, { color = variant.edge, transparency = 0.2, thickness = 1.5 })
@@ -372,7 +392,24 @@ function UIKit.Button(props)
 			TextColor3 = Theme.Colors[current.text],
 			TextTransparency = enabled and 0 or 0.5,
 		}
-		if Theme.Images.Brush == "" or not current.paint then
+		local usesImage = paintImage ~= nil and current.paint
+		if paintImage then
+			paintImage.Visible = usesImage
+		end
+		if usesImage then
+			goals.BackgroundTransparency = 1
+			local imageGoals = {
+				ImageColor3 = (enabled and hovered) and Color3.new(1, 1, 1) or Color3.fromRGB(228, 228, 228),
+				ImageTransparency = enabled and 0 or 0.45,
+			}
+			if instant then
+				for key, value in pairs(imageGoals) do
+					paintImage[key] = value
+				end
+			else
+				UIKit.Tween(paintImage, imageGoals, 0.12)
+			end
+		else
 			goals.BackgroundTransparency = enabled and 0 or 0.55
 		end
 		if instant then
@@ -425,11 +462,13 @@ end
 function UIKit.Bar(props)
 	local track = Instance.new("Frame")
 	track.BorderSizePixel = 0
-	track.BackgroundColor3 = Theme.Colors.Inset
+	track.BackgroundColor3 = color(props.trackColor, "Inset")
 	track.ClipsDescendants = true
 	apply(track, props)
 	UIKit.Corner(track, Theme.Radius.Small)
-	UIKit.Stroke(track, { color = "PanelEdge", transparency = 0.5, thickness = 1 })
+	if props.stroke ~= false then
+		UIKit.Stroke(track, { color = "PanelEdge", transparency = 0.5, thickness = 1 })
+	end
 
 	local fill = Instance.new("Frame")
 	fill.Name = "Fill"

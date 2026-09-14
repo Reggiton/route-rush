@@ -80,7 +80,7 @@ local STAT_TEXT = {
 		return string.format("Brakes %.1f", s.brakeDecel)
 	end,
 	Handles = function(s)
-		return string.format("Seats %d  Grip %d", s.capacity, math.floor(s.grip))
+		return string.format("Seats %d · Grip %d", s.capacity, math.floor(s.grip))
 	end,
 	Health = function(s)
 		return string.format("HP %d", s.maxHealth)
@@ -95,15 +95,15 @@ local function render()
 	end
 
 	gui.headerLabel.Text = string.format(
-		'<font color="#70D06E">%s</font>  <font color="#786E62">·</font>  <font color="#5898E8">Level %d</font>  <font color="#786E62">·</font>  <font color="#EEC648">Rep %d</font>',
+		'<font color="#65D176">%s</font>  <font color="#8A8F88">·</font>  <font color="#65D176">Level %d</font>  <font color="#8A8F88">·</font>  <font color="#65D176">Rep %d</font>',
 		formatCash(state.cash),
 		state.level,
 		state.reputation
 	)
 
-	local slotsText = string.format("Slots %d / %d unlocked", state.quote.slotsAfter, state.unlockedSlots)
+	local slotsText = string.format("Slots %d/%d Unlocked", state.quote.slotsAfter, state.unlockedSlots)
 	if state.nextUnlockReputation then
-		slotsText = slotsText .. string.format("  (more at %d rep)", state.nextUnlockReputation)
+		slotsText = slotsText .. string.format(" (more at %d Rep)", state.nextUnlockReputation)
 	end
 	gui.slotsLabel.Text = slotsText
 
@@ -112,7 +112,7 @@ local function render()
 		local fraction = Restoration.Fraction(state.chassisId, state.pending)
 		local bonus = Restoration.FareMultiplier(state.chassisId, state.pending) - 1
 		gui.chassisSub.Text = string.format(
-			"%s · %d%% restored (+%d%% fares)",
+			"%s - %d%% restored (+%d%% Fares)",
 			state.selected and "Driving this bus" or "Owned",
 			math.floor(fraction * 100 + 0.5),
 			math.floor(bonus * 100 + 0.5)
@@ -146,17 +146,17 @@ local function render()
 	local quote = state.quote
 	if not state.owned then
 		gui.quoteLabel.Text = state.blockReason or ("Buy this chassis for " .. formatCash(state.price))
-		gui.confirmButton.Text = "Buy " .. formatCash(state.price)
+		gui.confirmLabel.Text = "BUY " .. formatCash(state.price)
 	elseif quote.added + quote.removed == 0 then
 		gui.quoteLabel.Text = state.selected and "No changes" or (state.blockReason or "Switch to this bus")
-		gui.confirmButton.Text = state.selected and "Confirm" or "Drive this bus"
+		gui.confirmLabel.Text = state.selected and "CONFIRM" or "DRIVE THIS BUS"
 	else
 		local netText = quote.net >= 0 and ("Net -" .. formatCash(quote.net)) or ("Net +" .. formatCash(-quote.net))
 		gui.quoteLabel.Text = string.format("Cost %s · Refund %s · %s", formatCash(quote.cost), formatCash(quote.refund), netText)
 		if state.blockReason then
 			gui.quoteLabel.Text = gui.quoteLabel.Text .. " · " .. state.blockReason
 		end
-		gui.confirmButton.Text = "Confirm"
+		gui.confirmLabel.Text = "CONFIRM"
 	end
 
 	gui.confirmButton.Interactable = not swapping and state.canConfirm
@@ -322,6 +322,13 @@ gui.closeButton.MouseButton1Click:Connect(function()
 	closeLocal()
 	refreshOpenButton()
 end)
+
+-- MAP / MISSIONS / SETTINGS aren't built yet.
+for name, button in pairs(gui.navButtons) do
+	button.MouseButton1Click:Connect(function()
+		showToast(name .. " is coming soon")
+	end)
+end
 
 GarageReady.OnClientEvent:Connect(function(garageState)
 	state = garageState

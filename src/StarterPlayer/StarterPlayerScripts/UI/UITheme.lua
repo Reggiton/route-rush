@@ -6,62 +6,66 @@
 	Change the whole game's UI here -- UIKit.lua builds every component
 	from these tokens.
 
-	TEXTURES & ICONS (optional)
-	  Everything renders without images. To get the full hand-made look,
-	  upload images to Roblox and paste their ids ("rbxassetid://123...")
-	  into Theme.Images / Theme.Icons below:
-	    Images.PanelTexture  a dark grunge/scratched texture, used as a
-	                         9-slice behind every panel (PanelSliceCenter)
-	    Images.Tape          a torn masking-tape strip (PNG with alpha)
-	    Images.Brush         a mustard brush stroke for primary buttons
-	    Icons.*              white glyphs on transparent backgrounds
+	IMAGES (assets/ui in the repo)
+	  The rugged textures and icons were made to match the garage concept
+	  art. Upload the PNGs to Roblox (Studio: View > Asset Manager > Bulk
+	  Import, or Creator Hub) and paste each "rbxassetid://..." below.
+	  Anything left "" falls back to a code-drawn version of the same look.
+	  Full steps: assets/ui/README.md
 ]]
 
 local Theme = {}
 
-local MARKER = "rbxasset://fonts/families/PermanentMarker.json"
+-- Kalam Bold is the closest Roblox font to the concept art's slanted, condensed brush lettering.
+local BRUSH = "rbxasset://fonts/families/Kalam.json"
 local SANS = "rbxasset://fonts/families/SourceSansPro.json"
 
 Theme.Fonts = {
-	Brush = Font.new(MARKER, Enum.FontWeight.Regular), -- hand-painted headings, buttons, big labels
+	Brush = Font.new(BRUSH, Enum.FontWeight.Bold), -- hand-painted headings, buttons, big labels
 	Regular = Font.new(SANS, Enum.FontWeight.Regular),
 	Medium = Font.new(SANS, Enum.FontWeight.SemiBold),
 	Bold = Font.new(SANS, Enum.FontWeight.Bold),
+	BoldItalic = Font.new(SANS, Enum.FontWeight.Bold, Enum.FontStyle.Italic),
 	Heavy = Font.new(SANS, Enum.FontWeight.Heavy),
 }
 
 local C = Color3.fromRGB
 Theme.Colors = {
 	-- Surfaces: warm, oily charcoal
-	Panel = C(24, 22, 20),
-	PanelEdge = C(74, 66, 56),
-	Row = C(38, 35, 31),
-	RowEdge = C(60, 55, 47),
+	Panel = C(22, 21, 20),
+	PanelEdge = C(74, 66, 54),
+	Row = C(21, 21, 21),
+	RowEdge = C(40, 39, 38),
+	Plate = C(26, 27, 26), -- chassis selector, "No changes" strip
+	PlateEdge = C(36, 36, 36),
+	Key = C(30, 30, 32), -- small hardware keys (-, +, <, >, X)
+	KeyEdge = C(44, 44, 46),
 	Inset = C(14, 13, 12),
+	TrackGrey = C(55, 55, 55),
 
 	-- Paint & tape
-	Mustard = C(220, 180, 70),
-	MustardDark = C(150, 116, 38),
-	Tape = C(206, 180, 112),
+	Mustard = C(124, 97, 42),
+	MustardDark = C(90, 70, 30),
+	Tape = C(113, 76, 14),
 	Rust = C(166, 88, 42),
 
 	-- Text
-	Text = C(238, 232, 218),
-	TextMuted = C(172, 162, 144),
-	TextDim = C(120, 112, 98),
-	Ink = C(30, 24, 14), -- dark text on paint
+	Text = C(225, 222, 215),
+	TextMuted = C(150, 150, 150),
+	TextDim = C(125, 125, 125),
+	Ink = C(28, 24, 16), -- dark text on paint
 
 	-- Stats & status
-	Cash = C(112, 208, 110),
-	Level = C(88, 152, 232),
-	Rep = C(238, 198, 72),
-	Positive = C(112, 208, 110),
-	Negative = C(214, 82, 60),
-	Warning = C(234, 152, 58),
+	Cash = C(101, 209, 118),
+	Level = C(46, 95, 142),
+	Rep = C(231, 183, 72),
+	Positive = C(101, 209, 118),
+	Negative = C(200, 76, 58),
+	Warning = C(226, 150, 58),
 }
 
 -- Aliases used by components.
-Theme.Colors.Accent = Theme.Colors.Mustard
+Theme.Colors.Accent = Theme.Colors.Rep
 Theme.Colors.OnAccent = Theme.Colors.Ink
 Theme.Colors.Info = Theme.Colors.Level
 Theme.Colors.Track = Theme.Colors.Inset
@@ -72,11 +76,11 @@ Theme.Colors.SurfaceRaised = Theme.Colors.Row
 
 Theme.TextSize = {
 	Caption = 12,
-	Small = 14,
+	Small = 13,
 	Body = 16,
 	Title = 22,
-	Stat = 24,
-	Display = 34,
+	Stat = 22,
+	Display = 30,
 	Hero = 120,
 }
 
@@ -91,10 +95,10 @@ Theme.Spacing = { XS = 4, S = 8, M = 12, L = 16, XL = 24 }
 
 Theme.ScreenMargin = 12
 
--- Masking tape stuck over panel corners.
+-- Masking tape stuck over panel corners (design size of the tape image).
 Theme.Tape = {
-	Size = Vector2.new(58, 18),
-	Transparency = 0.1,
+	Size = Vector2.new(60, 20),
+	Transparency = 0.26,
 }
 
 -- SCALING: the UI is designed at ReferenceResolution and scales with the
@@ -104,23 +108,37 @@ Theme.UIScale = 1.1
 Theme.MinScale = 0.6
 Theme.MaxScale = 3
 
+-- Uploaded image ids. File names are relative to assets/ui/.
 Theme.Images = {
-	PanelTexture = "",
-	PanelSliceCenter = Rect.new(32, 32, 480, 480),
-	Tape = "",
-	Brush = "",
+	PanelFrame = "", -- textures/panel.png
+	PaintButton = "", -- textures/button_paint.png
+	Tape = "", -- textures/tape.png
+	BrushStrip = "", -- textures/brush_strip.png
+	TopBar = "", -- textures/topbar.png
+}
+
+-- How each texture is 9-sliced, in design pixels (the PNGs are rendered at ImageScale x).
+Theme.ImageScale = 3
+Theme.Slices = {
+	PanelFrame = Rect.new(14, 14, 66, 66),
+	PaintButton = Rect.new(24, 12, 276, 42),
+	BrushStrip = Rect.new(70, 22, 330, 58),
+	TopBar = Rect.new(24, 8, 536, 34),
 }
 
 Theme.Icons = {
-	Garage = "",
-	Timer = "",
-	Close = "",
-	Confirm = "",
-	Engine = "",
-	Accel = "",
-	Brakes = "",
-	Handles = "",
-	Health = "",
+	Garage = "", -- icons/garage.png
+	Timer = "", -- icons/timer.png
+	Map = "", -- icons/map.png
+	Missions = "", -- icons/missions.png
+	Settings = "", -- icons/settings.png
+	Engine = "", -- icons/engine.png
+	Accel = "", -- icons/accel.png
+	Brakes = "", -- icons/brakes.png
+	Handles = "", -- icons/handles.png
+	Health = "", -- icons/health.png
+	Wrench = "", -- icons/wrench.png
+	Crown = "", -- icons/crown.png
 }
 
 return Theme
