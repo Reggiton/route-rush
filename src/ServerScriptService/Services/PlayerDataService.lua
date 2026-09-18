@@ -31,6 +31,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local UpgradeConfig = require(ReplicatedStorage.GarageSystem.Config.UpgradeConfig)
 local EconomyConfig = require(ReplicatedStorage.Shared.Config.EconomyConfig)
+local ArmoryConfig = require(ReplicatedStorage.Shared.Config.ArmoryConfig)
 local Progression = require(ReplicatedStorage.Shared.Modules.Progression)
 local PowerScore = require(ReplicatedStorage.Shared.Modules.PowerScore)
 
@@ -98,6 +99,7 @@ local function defaultData()
 		xp = 0,
 		selectedChassis = UpgradeConfig.DefaultChassisId,
 		chassis = chassis,
+		warInventory = ArmoryConfig.EmptyInventory(),
 		stats = {
 			runs = 0,
 			bestFaresPerMin = 0,
@@ -127,6 +129,13 @@ local function reconcile(data)
 	end
 	if not UpgradeConfig.GetChassis(data.selectedChassis) or not data.chassis[data.selectedChassis].owned then
 		data.selectedChassis = UpgradeConfig.DefaultChassisId
+	end
+	for itemId, count in pairs(data.warInventory) do
+		if not ArmoryConfig.Get(itemId) then
+			data.warInventory[itemId] = nil
+		else
+			data.warInventory[itemId] = math.max(0, math.floor(tonumber(count) or 0))
+		end
 	end
 	data.cash = math.max(0, math.floor(data.cash))
 	data.version = SCHEMA_VERSION
@@ -257,6 +266,7 @@ function PlayerDataService.Snapshot(player)
 		xpForNext = xpForNext,
 		selectedChassis = data.selectedChassis,
 		chassis = deepCopy(data.chassis),
+		warInventory = deepCopy(data.warInventory),
 		unlockedSlots = Progression.UnlockedSlots(data.reputation),
 		nextUnlockReputation = Progression.NextUnlockReputation(data.reputation),
 		slotsUsed = Progression.SlotsUsed(selected.upgrades),

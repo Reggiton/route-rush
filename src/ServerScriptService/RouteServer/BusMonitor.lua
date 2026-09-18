@@ -16,12 +16,20 @@
 	  - Sanity: sustained over-speed, teleports, falling off the world,
 	    or lying on its side -> server reclaims and resets it to the road.
 
-	Other systems react through the callbacks passed to Start():
+	Other systems react through the callbacks passed to Watch():
 	  onImpact(player, damage), onBreakdown(player), onTowBack(player, seconds)
 
 	  - Tow-back: on layouts built without curbs (TrackLayouts), leaving the
 	    road for OffRoad.GraceSeconds freezes the bus briefly and puts it back
 	    on the tarmac. A time penalty, not damage.
+
+	Multiple rounds can watch buses at once (the regular loop and RouteWars
+	run concurrently, each building its own tracks): Watch(trackIds,
+	callbacks) registers one watch group and returns a handle with :Stop().
+	One shared Heartbeat loop serves every group; each sampled bus is routed
+	to whichever group claims its track id. Per-player history/cooldown
+	state is shared across groups too -- harmless, since a player only ever
+	drives on one track at a time.
 ]]
 
 local Players = game:GetService("Players")
@@ -44,10 +52,19 @@ local BusMonitor = {}
 local connection
 local towTokens = {} -- [Player] = token of the tow currently freezing them
 local towUntil = {} -- [Player] = os.clock() before which no new tow can fire
-local callbacks = {}
+local groups = {} -- { { trackIds = { [id] = true }, callbacks = {...} } }
 local states = {} -- [Player] = { bus, history = {{t, position}}, cooldownUntil, speedStrikes, flippedSince }
 local accumulator = 0
 local distances = {} -- [Player] = studs driven this race (kept after Stop for idle checks)
+
+local function callbacksForTrack(trackId)
+	for _, group in ipairs(groups) do
+		if group.trackIds[trackId] then
+			return group.callbacks
+		end
+	end
+	return nil
+end
 
 local function horizontal(vector)
 	return Vector3.new(vector.X, 0, vector.Z).Magnitude
@@ -72,7 +89,7 @@ end
 -- breakDown: same BrokenDown freeze (which the drive controller and
 -- PassengerService already honour), but no damage and no passengers lost --
 -- this is a time penalty, not a crash.
-local function towBack(player, record, position, speed, now)
+local function towBack(player, record, position, speed, now, callbacks)
 	local bus = record.bus
 	local seconds = math.min(
 		O.TowSeconds + speed * O.TowPerStudPerSecond,
@@ -103,7 +120,7 @@ local function towBack(player, record, position, speed, now)
 	end
 end
 
-local function breakDown(player, bus, stats)
+local function breakDown(player, bus, stats, callbacks)
 	bus:SetAttribute("Health", 0)
 	bus:SetAttribute("BrokenDown", true)
 	if callbacks.onBreakdown then
@@ -153,6 +170,10 @@ local function sample(player, record, now)
 	local bus = record.bus
 	local root = bus.PrimaryPart
 	if not root or not root.Parent then
+		return
+	end
+	local callbacks = callbacksForTrack(record.track.id)
+	if not callbacks then
 		return
 	end
 	local position = root.Position
@@ -223,7 +244,7 @@ local function sample(player, record, now)
 			state.offRoadSince = state.offRoadSince or now
 			local shoved = state.lastContactAt and now - state.lastContactAt < O.ContactGraceSeconds
 			if now - state.offRoadSince >= O.GraceSeconds and not shoved then
-				towBack(player, record, position, recentSpeed, now)
+				towBack(player, record, position, recentSpeed, now, callbacks)
 				return
 			end
 		else
@@ -281,18 +302,15 @@ local function sample(player, record, now)
 		callbacks.onImpact(player, damage)
 	end
 	if health <= 0 then
-		breakDown(player, bus, stats)
+		breakDown(player, bus, stats, callbacks)
 	end
 end
 
-function BusMonitor.Start(newCallbacks)
-	BusMonitor.Stop()
-	callbacks = newCallbacks or {}
+local function ensureConnection()
+	if connection then
+		return
+	end
 	accumulator = 0
-	distances = {}
-	towTokens = {}
-	towUntil = {}
-
 	connection = RunService.Heartbeat:Connect(function(dt)
 		accumulator = accumulator + dt
 		if accumulator < C.SampleInterval then
@@ -309,18 +327,86 @@ function BusMonitor.Start(newCallbacks)
 	end)
 end
 
-function BusMonitor.Stop()
+local function disconnect()
 	if connection then
 		connection:Disconnect()
 		connection = nil
 	end
-	states = {}
-	callbacks = {}
+end
+
+-- Registers one watch group covering the given track ids (an array), whose
+-- callbacks fire only for buses on those tracks. Returns a handle; call
+-- handle:Stop() when that round ends. Safe to have several groups (e.g. the
+-- regular loop and a RouteWars round) active at once.
+function BusMonitor.Watch(trackIds, watchCallbacks)
+	local idSet = {}
+	for _, id in ipairs(trackIds) do
+		idSet[id] = true
+	end
+	local group = { trackIds = idSet, callbacks = watchCallbacks or {} }
+	table.insert(groups, group)
+	ensureConnection()
+
+	local stopped = false
+	local handle = {}
+	function handle.Stop()
+		if stopped then
+			return
+		end
+		stopped = true
+		for i, existing in ipairs(groups) do
+			if existing == group then
+				table.remove(groups, i)
+				break
+			end
+		end
+		if #groups == 0 then
+			disconnect()
+		end
+	end
+	return handle
+end
+
+-- Call when a player is about to start a fresh race, so a bracket/track
+-- change doesn't inherit distance from a previous race (states self-heal on
+-- their own, since a new race always means a new bus instance).
+function BusMonitor.ResetDistance(player)
+	distances[player] = nil
+end
+
+-- Lets another system (WeaponService, for RouteWars hazards) damage a bus
+-- with the same health/breakdown rules a collision uses, dispatching to
+-- whichever round is currently watching that bus's track. Does not fire
+-- StopEvent itself -- callers know their own damage source and send a more
+-- specific toast than a generic "impact".
+function BusMonitor.ApplyDamage(player, damage)
+	local record = BusSpawner.GetRecord(player)
+	if not record or not record.bus.Parent then
+		return
+	end
+	local callbacks = callbacksForTrack(record.track.id) or {}
+	local bus = record.bus
+	local stats = BusStats.Compute(record.chassisId, record.levels, bus:GetAttribute("Passengers") or 0)
+	local health = math.max(0, (bus:GetAttribute("Health") or stats.maxHealth) - damage)
+	bus:SetAttribute("Health", health)
+	if callbacks.onImpact then
+		callbacks.onImpact(player, damage)
+	end
+	if health <= 0 then
+		breakDown(player, bus, stats, callbacks)
+	end
 end
 
 -- Studs a player's bus has driven since the race started (0 if unknown).
 function BusMonitor.GetDistance(player)
 	return distances[player] or 0
 end
+
+Players.PlayerRemoving:Connect(function(player)
+	states[player] = nil
+	distances[player] = nil
+	towTokens[player] = nil
+	towUntil[player] = nil
+end)
 
 return BusMonitor

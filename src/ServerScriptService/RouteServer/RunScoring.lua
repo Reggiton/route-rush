@@ -8,6 +8,11 @@
 	Players can join mid-race (AddPlayer) or leave early (FinishPlayer);
 	reputation is per-minute, so each player is scored on the time they
 	actually spent in the race.
+
+	Begin/Finish take an explicit player list rather than owning "the"
+	round: the regular loop and a RouteWars round keep separate stats
+	concurrently in the same `runs` table, keyed by player, so one round
+	starting or ending never touches the other's racers.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -77,7 +82,6 @@ local function payOut(player, stats)
 end
 
 function RunScoring.Begin(players)
-	runs = {}
 	for _, player in ipairs(players) do
 		runs[player] = newStats()
 	end
@@ -137,12 +141,15 @@ function RunScoring.FinishPlayer(player)
 	end
 end
 
--- Pays everyone still in the race and clears run state.
-function RunScoring.Finish()
-	local finishing = runs
-	runs = {}
-	for player, stats in pairs(finishing) do
-		payOut(player, stats)
+-- Pays out and clears stats for exactly the given players (a round's own
+-- racer list), leaving any other round's stats in `runs` untouched.
+function RunScoring.Finish(players)
+	for _, player in ipairs(players) do
+		local stats = runs[player]
+		if stats then
+			runs[player] = nil
+			payOut(player, stats)
+		end
 	end
 end
 

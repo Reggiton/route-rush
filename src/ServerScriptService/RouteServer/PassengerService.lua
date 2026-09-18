@@ -19,6 +19,11 @@
 	    (noisy) replicated velocity.
 
 	Bus attributes kept in sync: Passengers, AtStop (0 = not inside a ring).
+
+	AddTracks/RemoveTracks are additive rather than exclusive: the regular
+	loop and a RouteWars round each register their own tracks, and the one
+	shared scan loop serves all of them at once, keyed by track id. The loop
+	itself only runs while at least one track is registered.
 ]]
 
 local Players = game:GetService("Players")
@@ -44,7 +49,6 @@ local SCAN_INTERVAL = 0.1
 local STATE_PUSH_INTERVAL = 0.5
 local SPEED_SMOOTHING = 0.5 -- 0..1, how much each new speed sample counts
 
-local running = false
 local rng = Random.new()
 local trackStates = {} -- [trackId] = { track, stops = { [index] = { waiting = {passenger} } } }
 local onboard = {} -- [Player] = { passenger }
@@ -239,7 +243,7 @@ end
 -- Boarding (E presses) -----------------------------------------------------------------------------
 
 local function handleBoard(player, stopIndex)
-	if not running or type(stopIndex) ~= "number" then
+	if type(stopIndex) ~= "number" then
 		return
 	end
 	local now = os.clock()
@@ -301,22 +305,10 @@ RequestBoard.OnServerEvent:Connect(handleBoard)
 
 -- Public API -------------------------------------------------------------------------------------
 
-function PassengerService.Start(tracks)
-	PassengerService.Stop()
-	running = true
-
-	for _, track in ipairs(tracks) do
-		local trackState = { track = track, stops = {} }
-		trackStates[track.id] = trackState
-		for index in ipairs(track.stops) do
-			trackState.stops[index] = { waiting = {} }
-			addWaiting(trackState, index, RouteConfig.WaitingInitial)
-		end
+local function ensureLoop()
+	if #connections > 0 then
+		return
 	end
-	for player in pairs(BusSpawner.All()) do
-		onboard[player] = {}
-	end
-
 	local scanTimer, pushTimer, refillTimer = 0, 0, 0
 	table.insert(connections, RunService.Heartbeat:Connect(function(dt)
 		scanTimer = scanTimer + dt
@@ -344,17 +336,43 @@ function PassengerService.Start(tracks)
 	end))
 end
 
-function PassengerService.Stop()
-	running = false
-	for _, connection in ipairs(connections) do
-		connection:Disconnect()
+-- Registers tracks for passenger service (additive: safe to call while other
+-- tracks, from another concurrent round, are already registered).
+function PassengerService.AddTracks(tracks)
+	for _, track in ipairs(tracks) do
+		local trackState = { track = track, stops = {} }
+		trackStates[track.id] = trackState
+		for index in ipairs(track.stops) do
+			trackState.stops[index] = { waiting = {} }
+			addWaiting(trackState, index, RouteConfig.WaitingInitial)
+		end
 	end
-	connections = {}
-	trackStates = {}
-	onboard = {}
-	visits = {}
-	motion = {}
-	lastPress = {}
+	-- Players already spawned on one of these tracks (seated before this
+	-- call, as a round's starters are) need their onboard list ready too.
+	for player, record in pairs(BusSpawner.All()) do
+		if trackStates[record.track.id] and not onboard[player] then
+			onboard[player] = {}
+		end
+	end
+	ensureLoop()
+end
+
+-- Unregisters tracks (a round that just ended). Stops the shared loop once
+-- nothing is registered at all.
+function PassengerService.RemoveTracks(tracks)
+	for _, track in ipairs(tracks) do
+		trackStates[track.id] = nil
+	end
+	if next(trackStates) == nil then
+		for _, connection in ipairs(connections) do
+			connection:Disconnect()
+		end
+		connections = {}
+		onboard = {}
+		visits = {}
+		motion = {}
+		lastPress = {}
+	end
 end
 
 -- Breakdown: a fraction of onboard passengers give up and leave. Returns count lost.
@@ -377,7 +395,8 @@ end
 
 -- A player joining a race that's already running.
 function PassengerService.AddPlayer(player)
-	if running and not onboard[player] then
+	local record = BusSpawner.GetRecord(player)
+	if record and trackStates[record.track.id] and not onboard[player] then
 		onboard[player] = {}
 	end
 end

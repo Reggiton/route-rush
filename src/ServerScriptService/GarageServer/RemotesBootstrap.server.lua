@@ -41,6 +41,12 @@ local REMOTE_NAMES = {
 	"SetReady",
 	"SetMapVote",
 	"Notify",
+
+	-- RouteWars
+	"SetWarReady",
+	"RequestBuyArmoryItem",
+	"RequestUseWarItem",
+	"WaterSplash",
 }
 
 for _, remoteName in ipairs(REMOTE_NAMES) do

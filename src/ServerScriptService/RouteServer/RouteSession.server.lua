@@ -130,6 +130,7 @@ local function addToRound(player, track)
 	round.nextSlot[track.id] = slot % RouteConfig.GridSlots + 1
 	player:SetAttribute("TrackId", track.id)
 	BusSpawner.Spawn(player, track, slot)
+	BusMonitor.ResetDistance(player)
 
 	if round.running then
 		RunScoring.AddPlayer(player)
@@ -284,8 +285,12 @@ local function runRound(participants)
 	for _, player in ipairs(starters) do
 		BusSpawner.Release(player)
 	end
-	PassengerService.Start(round.tracks)
-	BusMonitor.Start({
+	PassengerService.AddTracks(round.tracks)
+	local trackIds = {}
+	for _, track in ipairs(round.tracks) do
+		table.insert(trackIds, track.id)
+	end
+	round.monitor = BusMonitor.Watch(trackIds, {
 		onImpact = function(player)
 			RunScoring.AddCollision(player)
 		end,
@@ -299,19 +304,33 @@ local function runRound(participants)
 
 	setPhase("Running", RouteConfig.RunSeconds)
 	waitPhase(RouteConfig.RunSeconds, function()
-		return next(BusSpawner.All()) == nil -- everyone left
+		-- Everyone in THIS round left -- not a global check, since a
+		-- RouteWars round may still have racers of its own in BusSpawner's
+		-- shared registry.
+		for player in pairs(round.racers) do
+			if BusSpawner.GetRecord(player) then
+				return false
+			end
+		end
+		return true
 	end)
 
 	round.running = false
 	round.phase = "Results"
-	BusMonitor.Stop()
-	PassengerService.Stop()
+	round.monitor:Stop()
+
+	local racerList = {}
+	for player in pairs(round.racers) do
+		table.insert(racerList, player)
+		PassengerService.RemovePlayer(player)
+	end
+	PassengerService.RemoveTracks(round.tracks)
 
 	-- Results
 	setPhase("Results", RouteConfig.ResultsSeconds)
 
 	-- Idle racers stop being Ready so they don't sit in every future race.
-	for player in pairs(round.racers) do
+	for _, player in ipairs(racerList) do
 		local stats = RunScoring.Get(player)
 		if stats and player.Parent == Players then
 			local timeInRace = os.clock() - stats.startedAt
@@ -323,8 +342,12 @@ local function runRound(participants)
 		end
 	end
 
-	RunScoring.Finish()
-	BusSpawner.DespawnAll()
+	RunScoring.Finish(racerList)
+	-- Targeted, not DespawnAll: a RouteWars round may be running concurrently
+	-- and its racers' buses (also in BusSpawner's shared registry) must stay.
+	for _, player in ipairs(racerList) do
+		BusSpawner.Despawn(player)
+	end
 	ReplicatedStorage:SetAttribute("MapLayout", nil)
 	for _, track in ipairs(round.tracks) do
 		TrackBuilder.Destroy(track)
@@ -351,16 +374,24 @@ while true do
 		local ok, err = pcall(runRound, participants)
 		if not ok then
 			warn("RouteSession: round failed, cleaning up: " .. tostring(err))
+			local crashedRound = currentRound
 			currentRound = nil
-			BusMonitor.Stop()
-			PassengerService.Stop()
-			BusSpawner.DespawnAll()
-			local instances = workspace:FindFirstChild("RouteInstances")
-			if instances then
-				instances:ClearAllChildren()
+			-- Targeted cleanup only -- a RouteWars round may be running
+			-- concurrently and must not be touched by this round's crash.
+			if crashedRound then
+				if crashedRound.monitor then
+					crashedRound.monitor:Stop()
+				end
+				PassengerService.RemoveTracks(crashedRound.tracks)
+				for _, track in ipairs(crashedRound.tracks) do
+					TrackBuilder.Destroy(track)
+				end
 			end
-			for _, player in ipairs(Players:GetPlayers()) do
-				if player:GetAttribute("TrackId") then
+			for player in pairs((crashedRound or {}).racers or {}) do
+				BusSpawner.Despawn(player)
+				PassengerService.RemovePlayer(player)
+				RunScoring.Remove(player)
+				if player.Parent == Players then
 					player:SetAttribute("TrackId", nil)
 					LobbyBuilder.SendToLobby(player)
 				end

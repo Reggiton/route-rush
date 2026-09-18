@@ -11,6 +11,11 @@
 	  /skip       end the current session phase now
 	  /hp N       set your bus's health to N% (during a route)
 	  /map ID     vote for a track layout (no argument lists the ids)
+	  /warskip    ready for RouteWars and end the current war phase now
+	  /waritem ID N   add N of a RouteWars item to your inventory (no
+	              argument lists the ids)
+	  /wartp      teleport to the RouteWarsZone part, for testing without
+	              walking there
 ]]
 
 local RunService = game:GetService("RunService")
@@ -84,6 +89,41 @@ local COMMANDS = {
 			bus:SetAttribute("Health", math.floor((bus:GetAttribute("MaxHealth") or 100) * percent / 100))
 		end
 	end,
+	warskip = function(player)
+		-- Also war-readies you, so /warskip in an empty lobby starts a war.
+		local WarReadyService = require(ServerScriptService.RouteServer.WarReadyService)
+		WarReadyService.SetReady(player, true)
+		ServerSignals.SkipWarPhase:Fire()
+	end,
+	waritem = function(player, text)
+		local ArmoryConfig = require(ReplicatedStorage.Shared.Config.ArmoryConfig)
+		local wanted = text:match("^/%a+%s+(%S+)")
+		local item = wanted and ArmoryConfig.Get(wanted)
+		if not item then
+			local names = {}
+			for _, entry in ipairs(ArmoryConfig.Items) do
+				table.insert(names, entry.id)
+			end
+			Notify:FireClient(player, "Items: " .. table.concat(names, ", "))
+			return
+		end
+		local amount = amountFrom(text:gsub("^/%a+%s+%S+", "", 1))
+		amount = amount ~= 0 and amount or 1
+		PlayerDataService.Update(player, function(data)
+			data.warInventory[item.id] = math.max(0, (data.warInventory[item.id] or 0) + amount)
+		end)
+		Notify:FireClient(player, string.format("%+d %s", amount, item.name))
+	end,
+	wartp = function(player)
+		local RouteWarsConfig = require(ReplicatedStorage.Shared.Config.RouteWarsConfig)
+		local zone = workspace:FindFirstChild(RouteWarsConfig.ZoneName, true)
+		local character = player.Character
+		if zone and zone:IsA("BasePart") and character then
+			character:PivotTo(zone.CFrame + Vector3.new(0, zone.Size.Y / 2 + 3, 0))
+		else
+			Notify:FireClient(player, "No '" .. RouteWarsConfig.ZoneName .. "' part found in Workspace.")
+		end
+	end,
 }
 
 local function run(player, text)
@@ -120,4 +160,4 @@ else
 	end
 end
 
-print("[DevCommands] Studio dev commands enabled: /cash N, /rep N, /xp N, /resetdata, /skip, /hp N, /map ID")
+print("[DevCommands] Studio dev commands enabled: /cash N, /rep N, /xp N, /resetdata, /skip, /hp N, /map ID, /warskip, /waritem ID N, /wartp")

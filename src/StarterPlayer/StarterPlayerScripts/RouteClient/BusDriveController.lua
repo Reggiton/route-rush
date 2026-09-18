@@ -240,6 +240,24 @@ local function step(dt)
 		throttle, steer, handbrake = 0, steer * 0.3, false
 	end
 
+	-- RouteWars item effects (WeaponService sets these attributes; nothing
+	-- here if you were never hit). "Until" timestamps are server time, since
+	-- WeaponService is a server script and this clock has to agree with it.
+	local now = workspace:GetServerTimeNow()
+	local topSpeedMult, accelMult, gripMult = 1, 1, 1
+	local boostUntil = bus:GetAttribute("BoostUntil")
+	if boostUntil and now < boostUntil then
+		topSpeedMult = topSpeedMult * (bus:GetAttribute("BoostSpeedMult") or 1)
+		accelMult = accelMult * (bus:GetAttribute("BoostAccelMult") or 1)
+	end
+	local slowUntil = bus:GetAttribute("SlowUntil")
+	if slowUntil and now < slowUntil then
+		topSpeedMult = topSpeedMult * (bus:GetAttribute("SlowMultiplier") or 1)
+	end
+	if bus:GetAttribute("OnSlick") then
+		gripMult = gripMult * (bus:GetAttribute("SlickGripMult") or 1)
+	end
+
 	-- Ground
 	local rootHeight = bus:GetAttribute("RootHeight") or 4
 	local hit = workspace:Raycast(root.Position, -up * (rootHeight + C.GroundRayLength), active.rayParams)
@@ -247,7 +265,8 @@ local function step(dt)
 	local normal = grounded and hit.Normal or up
 
 	-- Longitudinal
-	local topSpeed = stats.topSpeed
+	local topSpeed = stats.topSpeed * topSpeedMult
+	local accel = stats.accel * accelMult
 	if not grounded then
 		throttle = 0
 	end
@@ -255,7 +274,7 @@ local function step(dt)
 		if forwardSpeed < -1 then
 			forwardSpeed = approach(forwardSpeed, 0, stats.brakeDecel * throttle * dt)
 		elseif forwardSpeed < topSpeed then
-			forwardSpeed = math.min(topSpeed, forwardSpeed + stats.accel * throttle * dt)
+			forwardSpeed = math.min(topSpeed, forwardSpeed + accel * throttle * dt)
 		else
 			forwardSpeed = approach(forwardSpeed, topSpeed, C.CoastDecel * dt)
 		end
@@ -263,13 +282,22 @@ local function step(dt)
 		if forwardSpeed > 1 then
 			forwardSpeed = approach(forwardSpeed, 0, stats.brakeDecel * -throttle * dt)
 		else
-			forwardSpeed = math.max(-topSpeed * C.ReverseSpeedFraction, forwardSpeed - stats.accel * 0.6 * -throttle * dt)
+			forwardSpeed = math.max(-topSpeed * C.ReverseSpeedFraction, forwardSpeed - accel * 0.6 * -throttle * dt)
 		end
 	elseif grounded then
 		forwardSpeed = approach(forwardSpeed, 0, C.CoastDecel * dt)
 	end
 	if handbrake and grounded then
 		forwardSpeed = approach(forwardSpeed, 0, C.HandbrakeDecel * dt)
+	end
+
+	-- A mine's veer: a lateral bias blended into your own steering input for
+	-- a few seconds, so it works WITH the drive controller instead of
+	-- fighting a physics impulse the LinearVelocity constraint would just
+	-- override next frame.
+	local veerUntil = bus:GetAttribute("VeerUntil")
+	if veerUntil and now < veerUntil then
+		steer = math.clamp(steer + (bus:GetAttribute("VeerBias") or 0), -1, 1)
 	end
 
 	-- Steering
@@ -280,7 +308,8 @@ local function step(dt)
 	local yawRate = grounded and (-steer * stats.turnRate * lowSpeedFactor * highSpeedFactor * direction) or 0
 
 	-- Grip / slide
-	local gripLimit = stats.grip * (handbrake and C.HandbrakeGripFactor or 1)
+	local grip = stats.grip * gripMult
+	local gripLimit = grip * (handbrake and C.HandbrakeGripFactor or 1)
 	local demand = math.abs(forwardSpeed * yawRate)
 	if demand > gripLimit then
 		active.sliding = true
@@ -334,7 +363,7 @@ local function step(dt)
 	local planeForward = headingForward - normal * headingForward:Dot(normal)
 	planeForward = planeForward.Magnitude > 0.01 and planeForward.Unit or headingForward
 	local planeRight = planeForward:Cross(normal)
-	local rollAmount = math.clamp(forwardSpeed * yawRate / math.max(stats.grip, 1), -1, 1) * (0.4 + 0.6 * stats.load)
+	local rollAmount = math.clamp(forwardSpeed * yawRate / math.max(grip, 1), -1, 1) * (0.4 + 0.6 * stats.load)
 	constraints.alignOrientation.CFrame = CFrame.fromMatrix(Vector3.zero, planeRight, normal)
 		* CFrame.Angles(0, 0, math.rad(C.BodyRollMaxDegrees * rollAmount))
 

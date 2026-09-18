@@ -11,4 +11,7 @@ local ServerSignals = {}
 -- commands for fast testing.
 ServerSignals.SkipPhase = Instance.new("BindableEvent")
 
+-- Same, for RouteWarsSession's independent phase loop.
+ServerSignals.SkipWarPhase = Instance.new("BindableEvent")
+
 return ServerSignals
