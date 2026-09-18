@@ -8,13 +8,13 @@
 	    gets there first gets first pick.
 	  - Every stop is a glowing bay in the left lane. While a bus's center
 	    is inside it:
-	      * it earns boarding allowance at Boarding.RatePerSecond(speed) --
-	        the slower it goes, the faster; a full stop is fastest
-	      * each RequestBoard (E press) spends allowance to board passengers
 	      * passengers for this stop get off automatically (and pay) as long
-	        as the bus is below MaxBoardSpeed
-	    So a quick drive-by grabs a couple of passengers; stopping takes the
-	    whole crowd. Opportunity cost: more per stop vs. more stops.
+	        as the bus is at or under DropOffMph
+	      * each RequestBoard (E press) boards passengers, up to the cap its
+	        current speed allows (Boarding.BoardCap): 2 at 30 mph, 4 at 20,
+	        the whole crowd at 10
+	    The cap counts the whole visit, so braking part-way through a bay
+	    unlocks the next tier. Opportunity cost: more per stop vs. more stops.
 	  - Speed is measured from the bus's replicated position, not its
 	    (noisy) replicated velocity.
 
@@ -48,7 +48,7 @@ local running = false
 local rng = Random.new()
 local trackStates = {} -- [trackId] = { track, stops = { [index] = { waiting = {passenger} } } }
 local onboard = {} -- [Player] = { passenger }
-local visits = {} -- [Player] = { stop, allowance, boarded } while inside a ring
+local visits = {} -- [Player] = { stop, boarded } while inside a ring
 local motion = {} -- [Player] = { t, position, speed }
 local lastPress = {} -- [Player] = os.clock() of the last accepted RequestBoard
 local connections = {}
@@ -190,9 +190,9 @@ local function deliverAt(player, record, stopIndex)
 	end
 end
 
--- Scan loop: speed, ring membership, boarding allowance, drop-offs ------------------------------
+-- Scan loop: speed, ring membership, drop-offs ------------------------------------------------
 
-local function scan(dt)
+local function scan()
 	local now = os.clock()
 	for player, record in pairs(BusSpawner.All()) do
 		local root = record.bus.PrimaryPart
@@ -223,17 +223,14 @@ local function scan(dt)
 
 			local visit = visits[player]
 			if (visit and visit.stop) ~= found then
-				visit = found and { stop = found, allowance = 0, boarded = 0 } or nil
+				visit = found and { stop = found, boarded = 0 } or nil
 				visits[player] = visit
 				record.bus:SetAttribute("AtStop", found or 0)
 				pushState(player)
 			end
 
-			if visit then
-				visit.allowance = math.min(RouteConfig.MaxBankedBoardings, visit.allowance + Boarding.RatePerSecond(speed) * dt)
-				if Boarding.CanBoard(speed) then
-					deliverAt(player, record, found)
-				end
+			if visit and Boarding.CanDropOff(speed) then
+				deliverAt(player, record, found)
 			end
 		end
 	end
@@ -264,16 +261,18 @@ local function handleBoard(player, stopIndex)
 
 	local list = getOnboard(player)
 	local capacity = record.bus:GetAttribute("Capacity") or 0
+	-- How fast you are going right now decides the cap for the whole visit,
+	-- so slowing down mid-bay unlocks the next tier.
+	local speed = motion[player] and motion[player].speed or 0
 	local boarding = math.min(
-		math.floor(visit.allowance),
 		RouteConfig.MaxBoardPerPress,
+		Boarding.BoardCap(speed) - visit.boarded,
 		capacity - #list,
 		#stopState.waiting
 	)
 	if boarding <= 0 then
 		return
 	end
-	visit.allowance = visit.allowance - boarding
 	visit.boarded = visit.boarded + boarding
 
 	local stopCount = #record.track.stops
@@ -325,7 +324,7 @@ function PassengerService.Start(tracks)
 		refillTimer = refillTimer + dt
 
 		if scanTimer >= SCAN_INTERVAL then
-			scan(scanTimer)
+			scan()
 			scanTimer = 0
 		end
 		if refillTimer >= RouteConfig.RefillInterval then

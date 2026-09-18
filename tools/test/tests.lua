@@ -203,21 +203,227 @@ eq("two-slice sweep back", Restoration.ThresholdFor({ levels = { 2, 8 }, sweep =
 -- Boarding on the move
 local Boarding = require(RS.Shared.Modules.Boarding)
 local RouteConfig = require(RS.Shared.Config.RouteConfig)
-eq("stopped = full slowness", Boarding.Slowness(0), 1)
-eq("at max board speed = no slowness", Boarding.Slowness(RouteConfig.MaxBoardSpeed), 0)
-eq("way too fast = no slowness", Boarding.Slowness(500), 0)
-eq("no boarding at max speed", Boarding.RatePerSecond(RouteConfig.MaxBoardSpeed), 0)
-check("can't board at max speed", not Boarding.CanBoard(RouteConfig.MaxBoardSpeed))
-check("can board when slow", Boarding.CanBoard(RouteConfig.MaxBoardSpeed - 1))
-eq("full stop rate", Boarding.RatePerSecond(0), RouteConfig.BoardRateMax * RouteConfig.FullStopBonus)
-local previousRate = math.huge
-for speed = 0, RouteConfig.MaxBoardSpeed + 10, 2 do
-	local rate = Boarding.RatePerSecond(speed)
-	check("slower boards faster (" .. speed .. ")", rate <= previousRate, rate)
-	previousRate = rate
+local mph = Boarding.Studs -- mph -> studs/s, the unit the game measures in
+
+eq("mph round-trips through studs", Boarding.Mph(Boarding.Studs(37)), 37)
+eq("zero is zero mph", Boarding.Mph(0), 0)
+
+-- The three tiers, checked at their exact thresholds (inclusive) and just over.
+eq("30 mph picks up 2", Boarding.BoardCap(mph(30)), 2)
+eq("just over 30 picks up nobody", Boarding.BoardCap(mph(30.1)), 0)
+eq("20 mph picks up 4", Boarding.BoardCap(mph(20)), 4)
+eq("25 mph is still the 30 tier", Boarding.BoardCap(mph(25)), 2)
+eq("10 mph takes the whole crowd", Boarding.BoardCap(mph(10)), math.huge)
+eq("a full stop takes the whole crowd", Boarding.BoardCap(0), math.huge)
+
+check("cannot board way too fast", not Boarding.CanBoard(mph(60)))
+check("can board at the top tier", Boarding.CanBoard(mph(30)))
+check("drop-offs happen at 30", Boarding.CanDropOff(mph(30)))
+check("no drop-offs over 30", not Boarding.CanDropOff(mph(31)))
+eq("fastest boarding speed", Boarding.MaxBoardSpeed(), mph(30))
+
+-- Slowing down must never cost you capacity.
+local previousCap = -1
+for speedMph = 40, 0, -1 do
+	local cap = Boarding.BoardCap(mph(speedMph))
+	check("slower never boards less (" .. speedMph .. " mph)", cap >= previousCap, cap)
+	previousCap = cap
 end
-check("stopping beats rolling", Boarding.RatePerSecond(0) > Boarding.RatePerSecond(RouteConfig.FullStopSpeed + 1))
-check("half speed boards less than half as fast (curve)", Boarding.RatePerSecond((RouteConfig.MaxBoardSpeed + RouteConfig.FullStopSpeed) / 2) < RouteConfig.BoardRateMax * 0.5)
+
+-- NextTier points at the least slowing down that actually buys you something.
+eq("next tier from 30 is 20", Boarding.NextTier(mph(30)).speed, mph(20))
+eq("next tier from 25 is 20", Boarding.NextTier(mph(25)).speed, mph(20))
+eq("next tier from 20 is 10", Boarding.NextTier(mph(20)).speed, mph(10))
+eq("next tier from 50 is 30", Boarding.NextTier(mph(50)).speed, mph(30))
+check("no tier below the slowest", Boarding.NextTier(mph(5)) == nil)
+
+local sorted = Boarding.TiersBySpeed()
+eq("tiers sort slowest first", sorted[1].speed, mph(10))
+eq("tiers sort fastest last", sorted[#sorted].speed, mph(30))
+check("sorting does not mutate the config", RouteConfig.BoardTiers[1].speed == mph(30))
+
+-- Tier thresholds are stored in studs/s, so retuning the speedometer's mph
+-- conversion must not move them.
+eq("tiers are stored in studs", RouteConfig.BoardTiers[1].speed, 45)
+eq("drop-off threshold is stored in studs", RouteConfig.DropOffSpeed, 45)
+
+-- Track layouts ------------------------------------------------------------------
+local TrackLayouts = require(RS.Shared.Config.TrackLayouts)
+
+-- A stand-in for Roblox's Random: the layouts only need NextNumber, and taking
+-- it as an argument is what lets TrackBuilder keep drawing obstacles from the
+-- same generator.
+local function fakeRng(values)
+	local index = 0
+	return {
+		NextNumber = function(_, low, high)
+			index = index + 1
+			local value = values[(index - 1) % #values + 1]
+			if low and high then
+				return low + value * (high - low)
+			end
+			return value
+		end,
+	}
+end
+
+eq("three layouts", #TrackLayouts.List, 3)
+eq("default is the original loop", TrackLayouts.DefaultId, "cityLoop")
+check("unknown id has no layout", TrackLayouts.Get("nope") == nil)
+check("non-string id has no layout", TrackLayouts.Get(42) == nil)
+check("unknown id resolves to the default", TrackLayouts.Resolve("nope").id == "cityLoop")
+check("nil resolves to the default", TrackLayouts.Resolve(nil).id == "cityLoop")
+
+local seenIds = {}
+for _, layout in ipairs(TrackLayouts.List) do
+	check("unique id: " .. layout.id, not seenIds[layout.id])
+	seenIds[layout.id] = true
+	check(layout.id .. " has a name", type(layout.name) == "string" and #layout.name > 0)
+	check(layout.id .. " has a blurb", type(layout.blurb) == "string" and #layout.blurb > 0)
+	check(layout.id .. " has a sane road width", layout.roadWidth >= 20 and layout.roadWidth <= 120)
+	check(layout.id .. " declares curbs", type(layout.curbs) == "boolean")
+	check(layout.id .. " has at least 2 grid columns", layout.gridColumns >= 2)
+
+	local points = layout.points(fakeRng({ 0.25, 0.75 }))
+	check(layout.id .. " returns points", #points >= 8)
+
+	-- Closed ring: the last point must NOT repeat the first (TrackBuilder wraps
+	-- with i % #points + 1), and no segment may be zero-length or laneCFrame's
+	-- .Unit would be NaN.
+	local first, last = points[1], points[#points]
+	check(layout.id .. " does not duplicate the closing point", (first.x - last.x) ^ 2 + (first.z - last.z) ^ 2 > 1)
+
+	local minSegment, total = math.huge, 0
+	for i = 1, #points do
+		local a, b = points[i], points[i % #points + 1]
+		check(layout.id .. " point " .. i .. " is finite", a.x == a.x and a.z == a.z and a.y == a.y)
+		local segment = math.sqrt((b.x - a.x) ^ 2 + (b.y - a.y) ^ 2 + (b.z - a.z) ^ 2)
+		minSegment = math.min(minSegment, segment)
+		total = total + segment
+	end
+	check(layout.id .. " has no zero-length segment", minSegment > 1, minSegment)
+	check(layout.id .. " is a sensible length", total > 800 and total < 6000, total)
+end
+
+-- The default layout must draw exactly two numbers, in order, and keep the rest
+-- of the generator untouched: TrackBuilder reuses the same rng for obstacles, so
+-- a third draw here would move every obstacle on the live map.
+local counted = 0
+local countingRng = {
+	NextNumber = function(_, low, high)
+		counted = counted + 1
+		return low and (low + 0.5 * (high - low)) or 0.5
+	end,
+}
+TrackLayouts.Get("cityLoop").points(countingRng)
+eq("city loop draws exactly two random numbers", counted, 2)
+
+check("city loop is flat", (function()
+	for _, point in ipairs(TrackLayouts.Get("cityLoop").points(fakeRng({ 0.3 }))) do
+		if point.y ~= 0 then
+			return false
+		end
+	end
+	return true
+end)())
+
+check("hill circuit climbs and descends", (function()
+	local low, high = math.huge, -math.huge
+	for _, point in ipairs(TrackLayouts.Get("hills").points(fakeRng({ 0.3 }))) do
+		low, high = math.min(low, point.y), math.max(high, point.y)
+	end
+	return high > 10 and low < -10 and high <= RouteConfig.HillAmplitude + 0.001
+end)())
+
+check("boulevard is wider than the city loop", TrackLayouts.Get("boulevard").roadWidth > TrackLayouts.Get("cityLoop").roadWidth)
+check("boulevard has no curbs", not TrackLayouts.Get("boulevard").curbs)
+check("city loop keeps its curbs", TrackLayouts.Get("cityLoop").curbs)
+
+-- Map vote -----------------------------------------------------------------------
+local MapVote = require(RS.Shared.Modules.MapVote)
+
+local counts, total = MapVote.Tally({ a = "hills", b = "hills", c = "boulevard" })
+eq("tally counts a winner", counts.hills, 2)
+eq("tally counts a runner-up", counts.boulevard, 1)
+eq("tally totals", total, 3)
+
+local ignored, ignoredTotal = MapVote.Tally({ a = "nonsense", b = nil, c = 7 })
+eq("unknown ids are ignored", ignoredTotal, 0)
+check("unknown ids leave no counts", next(ignored) == nil)
+
+eq("most votes wins", MapVote.Winner({ a = "hills", b = "hills", c = "boulevard" }), "hills")
+eq("a single vote wins", MapVote.Winner({ a = "boulevard" }), "boulevard")
+eq("nobody voting keeps the default", MapVote.Winner({}), "cityLoop")
+eq("only junk votes keeps the default", MapVote.Winner({ a = "nonsense" }), "cityLoop")
+-- Ties fall back through registry order, and the default sits first.
+eq("a tie including the default takes the default", MapVote.Winner({ a = "cityLoop", b = "hills" }), "cityLoop")
+eq("a tie without the default takes registry order", MapVote.Winner({ a = "hills", b = "boulevard" }), "boulevard")
+
+-- The grid spread must still put two columns exactly where they have always been.
+local function gridLateral(column, columns, width)
+	return (column - (columns - 1) / 2) * width / columns
+end
+eq("two-column grid, left slot unchanged", gridLateral(0, 2, 28), -7)
+eq("two-column grid, right slot unchanged", gridLateral(1, 2, 28), 7)
+eq("four-column grid is centred", gridLateral(0, 4, 56) + gridLateral(3, 4, 56), 0)
+
+-- Stops alternate kerbs. Mirrors TrackBuilder's rule so a change there without a
+-- change here shows up; -1 is the left kerb, the side everything used to be on.
+local function stopSide(index, alternating)
+	return (alternating and index % 2 == 0) and 1 or -1
+end
+eq("stop 1 stays on the left", stopSide(1, true), -1)
+eq("stop 2 crosses to the right", stopSide(2, true), 1)
+eq("stop 3 is back on the left", stopSide(3, true), -1)
+eq("stop 8 is on the right", stopSide(8, true), 1)
+check("alternating uses both kerbs", (function()
+	local left, right = 0, 0
+	for index = 1, RouteConfig.StopCount do
+		if stopSide(index, true) < 0 then
+			left = left + 1
+		else
+			right = right + 1
+		end
+	end
+	return left > 0 and right > 0 and left + right == RouteConfig.StopCount
+end)())
+check("turning it off puts every stop back on the left", (function()
+	for index = 1, RouteConfig.StopCount do
+		if stopSide(index, false) ~= -1 then
+			return false
+		end
+	end
+	return true
+end)())
+
+-- Garage grounding ---------------------------------------------------------------
+-- The chassis are different heights, and their pivots sit at different heights
+-- inside them, which is exactly why the garage cannot place them all at one
+-- fixed offset. This pins the root cause: if these ever became equal, a constant
+-- would work and GarageLayout.GroundModel could go. They are not equal.
+local seenRootHeight, distinctRootHeights = {}, 0
+for _, tier in ipairs(UpgradeConfig.ChassisTiers) do
+	local spec = tier.body
+	-- Transcribed from BusBuilder.buildPlaceholder: ground -> root centre.
+	local bodyHeight = spec.height * spec.decks
+	local wheelRadius = math.max(1.6, spec.width * 0.22)
+	local rootHeight = wheelRadius * 0.9 + bodyHeight / 2
+	check(tier.id .. " has a positive root height", rootHeight > 0, rootHeight)
+	if not seenRootHeight[rootHeight] then
+		seenRootHeight[rootHeight] = true
+		distinctRootHeights = distinctRootHeights + 1
+	end
+end
+check("chassis pivots sit at different heights, so one offset cannot ground them all", distinctRootHeights > 1, distinctRootHeights)
+
+-- A bay must fit inside the lane it sits in, on every layout, or it would spill
+-- across the centre line.
+for _, layout in ipairs(TrackLayouts.List) do
+	local laneCentre = layout.roadWidth / 4
+	local bayHalf = RouteConfig.StopBayWidth / 2
+	check(layout.id .. " bay stays inside its lane", bayHalf <= laneCentre, bayHalf .. " vs " .. laneCentre)
+	check(layout.id .. " bay does not cross the centre line", laneCentre - bayHalf >= 0)
+end
 
 print(string.format("%d passed, %d failed", passes, failures))
 if failures > 0 then

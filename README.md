@@ -7,9 +7,10 @@ the garage.
 
 This repo contains the **P0 core loop** from the Build Plan:
 
-- **Garage**: a private, client-only scene. Upgrade 5 stats across 4 chassis
-  tiers, with reputation-gated slots, cash costs, a 60% refund on respec,
-  and chassis purchases.
+- **Garage**: a private, client-only showroom. Every chassis tier is parked in
+  its own bay wearing its own upgrades; picking one pans the camera to it.
+  Upgrade 5 stats across 4 chassis tiers, with reputation-gated slots, cash
+  costs, a 60% refund on respec, and chassis purchases.
 - **Player data**: cash, reputation, XP/level, and per-chassis upgrades,
   saved to DataStores with session locking.
 - **Route sessions**: server-wide rounds (intermission → countdown → 5-minute
@@ -47,6 +48,7 @@ real art later (see *Extending*).
 | `/resetdata` | wipe your profile |
 | `/skip` | end the current session phase now (also marks you Ready) |
 | `/hp N` | set your bus's health to N% during a route (preview damage effects) |
+| `/map ID` | vote for a track layout; no argument lists the ids |
 
 ### Controls
 
@@ -70,6 +72,29 @@ Intermission (30s) ──► Countdown (5s) ──► Running (300s) ──► R
       ▲─────────────────────────────────────────────────────────────────────────┘
 ```
 
+- **Map vote:** the lobby panel above the Ready card lists the track layouts;
+  click one to vote, click it again to take your vote back. The tally is live
+  for everyone. The vote closes the moment the countdown starts, so a late
+  voter still counts, and both bracket tracks always use the same layout.
+  Nobody voting (or a tie) keeps the default City Loop, so an idle server
+  behaves exactly as it always has.
+
+  | Layout | Road | Edges |
+  | --- | --- | --- |
+  | City Loop | 2 lanes | hard curbs |
+  | Wide Boulevard | 4 lanes | **no curbs** — off-road gets you towed back |
+  | Hill Circuit | 2 lanes | hard curbs, two climbs and two descents |
+
+  Layouts live in `TrackLayouts.lua`: a name, a road width, whether to build
+  curbs, how many grid columns, and one function returning the closed ring of
+  points. Adding a fourth is that table plus a `points()`.
+- **Tow-back:** on a layout built without curbs there is no wall to stop you
+  leaving the road. Drift off for more than `OffRoad.GraceSeconds` (1.5s) and
+  a tow puts you back on the tarmac, frozen for a couple of seconds — longer
+  the faster you were going, capped. It is a time penalty, not damage: no
+  health lost and no passengers lost, so it always stays cheaper than a
+  breakdown. Getting shoved off by another bus within the last 2s doesn't
+  count, so ramming someone into the grass isn't a free win.
 - **Ready up:** only players who click **Ready** race. Everyone else stays
   in the lobby (garage available).
   - At least `MinReadyToStart` (1) player must be Ready. If the 30s
@@ -82,24 +107,40 @@ Intermission (30s) ──► Countdown (5s) ──► Running (300s) ──► R
   - Ready players stay Ready round after round. Racers who sat idle for a
     whole race (barely drove, delivered nobody) are set back to Not Ready.
   - All of this is tunable in `RouteConfig.lua` → *Ready-up*.
-- **Stops:** every stop is a glowing rectangular bay in the left lane. Steer
-  the bus into it (it's narrower than the road). You don't have to stop:
+- **Stops:** every stop is a glowing rectangular bay against one kerb, and the
+  stops **alternate sides** — odd on the left, even on the right — so a lap
+  means weaving across the road rather than hugging one side. Steer the bus
+  into the bay (it's narrower than the lane). You don't have to stop:
   - **Boarding:** drive through and press or hold **E** to board passengers.
-    The slower you're going, the faster they get on, and a full stop is
-    fastest. Above 50 studs/s nobody boards. A quick drive-by grabs a
-    couple; stopping takes the whole crowd. It's a trade-off: more
-    passengers per stop, or more stops.
+    Your speed through the bay sets how many you may pick up there:
+
+    | Speed | You can pick up |
+    | --- | --- |
+    | 30 mph or under | 2 |
+    | 20 mph or under | 4 |
+    | 10 mph or under | as many as the bus will hold |
+    | over 30 mph | nobody |
+
+    The cap counts everyone boarded during that visit, so you can take 2 at
+    30, brake to 20 and take 2 more. That's the trade-off: blast through at
+    30 when you only need to shed one passenger, or slow right down and pay
+    the time to fill the bus.
   - **Waiting passengers:** each stop still has a limited queue that refills
     over time.
   - **Drop-offs:** passengers for that stop get off automatically while you're
-    in the ring below 50 studs/s. They pay `FareBase + FarePerStop × stops
+    in the bay at 30 mph or under. They pay `FareBase + FarePerStop × stops
     travelled`, plus 25% if delivered before their deadline.
+  - **Speedometer:** the bottom-right dial reads in mph, and its tick marks
+    are coloured by those tiers, so you can see what the bay is worth at your
+    current speed without doing the arithmetic.
   - All of this is tunable in `RouteConfig.lua` → *Boarding on the move*.
-  - **Stop cards:** a card floats above every stop on your track, visible
-    only to you. It shows how many people are waiting, how many of *your*
-    passengers get off there, and a live countdown to their deadline
-    (amber when close, red when late). Stops with drop-offs show through
-    walls, and the most urgent one gets a yellow border.
+  - **Stop list:** the left edge of the screen lists the stops coming up on
+    your track, visible only to you: how many people are waiting, how far
+    away each one is, **which kerb it's on**, how many of *your* passengers
+    get off there, and a live countdown to their deadline (amber when close,
+    red when late).
+    Stops you owe a drop-off to stay listed even once you've passed them,
+    and the most urgent one gets a yellow border.
 - **Load:** each passenger pushes the bus toward the full-load penalties
   (−15% top speed, −35% accel, −30% brakes, −40% grip). Handles upgrades
   soften the grip penalty.
@@ -136,17 +177,18 @@ src/ReplicatedStorage/
   GarageSystem/
     Config/UpgradeConfig.lua         categories, max level, chassis tiers (stats, prices, body shapes)
     Config/UpgradeCatalog.lua        GENERATED names/visuals for all 180 upgrades (from the spreadsheet)
-    Config/GarageLayoutConfig.lua    garage camera/player/bus/behind offsets
+    Config/GarageLayoutConfig.lua    garage camera/player/bus/behind offsets + bay spacing
     Config/RestorationConfig.lua     which upgrade unrusts which part of the bus, at which levels
     Modules/BusRestoration.lua       swaps rusted parts for pristine ones on a built bus
     Modules/BusBuilder.lua           builds a tier's bus: Root + visuals + one Attachment per category
     Modules/BusUpgradeApplier.lua    welds/unwelds upgrade models onto a bus
     Modules/UpgradeModelProvider.lua (category, level) -> Model  (placeholder blocks)
-    Modules/GarageLayout.lua         anchor CFrame -> camera/player/bus/behind CFrames
+    Modules/GarageLayout.lua         anchor CFrame -> per-bay camera/player/bus CFrames, model grounding
   Shared/
     Config/EconomyConfig.lua         cash, slot prices, rep thresholds, XP curve, run rewards
     Config/DrivingConfig.lua         upgrade gains, load penalties, controller + collision tuning
     Config/RouteConfig.lua           phase timings, track generation, stops/passengers, brackets
+    Config/TrackLayouts.lua          the selectable track layouts (road width, curbs, shape)
     Config/DamageEffectsConfig.lua   smoke / red tint / flames thresholds for damaged buses
     Modules/Restoration.lua          pure math: restoration slices, % restored, fare bonus
     Modules/Progression.lua          pure math: levels, slots, quotes/refunds, fares, payout, reputation
@@ -161,7 +203,8 @@ src/ServerScriptService/
   DevTools/DevCommands.server.lua           Studio-only chat commands
   RouteServer/RouteSession.server.lua       the round state machine (entry point)
   RouteServer/LobbyBuilder.lua              finds or builds the lobby spawn
-  RouteServer/TrackBuilder.lua              builds a track (RouteMap template or procedural loop)
+  RouteServer/TrackBuilder.lua              builds a track (RouteMap template or a TrackLayouts layout)
+  RouteServer/MapVoteService.lua            lobby map vote: per-player votes, tally, winner
   RouteServer/BusSpawner.lua                spawn/seat/release/reset/despawn buses
   RouteServer/BusMonitor.lua                server collisions, breakdowns, anti-cheat resets
   RouteServer/PassengerService.lua          stop queues, boarding, drop-offs, fares
@@ -170,15 +213,15 @@ src/ServerScriptService/
   RouteServer/ReadyService.lua              who is Ready (player attribute), SetReady remote
 
 src/StarterPlayer/StarterPlayerScripts/
-  GarageClient/GarageController.client.lua  local garage scene + GUI wiring
+  GarageClient/GarageController.client.lua  local garage showroom + camera pan + GUI wiring
   GarageClient/GarageGuiBuilder.lua         builds the garage GUI
-  GarageClient/GarageSwapSequence.lua       jump / smoke / swap animation
+  GarageClient/GarageSwapSequence.lua       jump / smoke / swap animation (UNUSED: the camera pan replaced it)
   RouteClient/RouteClient.client.lua        HUD, boarding, results, starts driving + camera
   RouteClient/RouteHudBuilder.lua           builds the route HUD
   RouteClient/BusDriveController.lua        arcade driving physics (client-owned)
   RouteClient/ChaseCamera.lua               follow camera
   RouteClient/BusDamageEffects.client.lua   smoke, red tint and flames on damaged buses
-  RouteClient/StopBillboards.lua            per-player stop cards: waiting, your drop-offs, deadlines
+  RouteClient/StopPanel.lua                 per-player stop list (left edge): waiting, your drop-offs, deadlines
   UI/UITheme.lua                            design tokens: colors, fonts, text sizes, radii, spacing
   UI/UIKit.lua                              UI components (panels, text, buttons, bars, stats, scaling)
   UI/Format.lua                             cash / time / count formatting
@@ -204,9 +247,14 @@ tunable number lives in a Config file.**
 | A real lobby | add `Workspace.Lobby` with a SpawnLocation |
 | A hand-built route | add `Workspace.RouteMap` (Model); tag stop parts `RouteStop` + `Index` attribute, optional grid parts `RouteGrid` + `Index` |
 | Cross-server matchmaking | replace `BracketService.Assign()` |
-| Retime the garage swap animation | `TIMING` in `GarageSwapSequence.lua` |
-| Restyle the garage / HUD / stop cards (plain original style) | `GarageGuiBuilder.lua`, `RouteHudBuilder.lua`, `StopBillboards.lua` |
+| Space out the garage bays | `GarageLayoutConfig.SpotSpacing` (studs between bay centres; negative flips the row) |
+| Retime the bay-to-bay camera pan | `GarageLayoutConfig.SpotPanTime` |
+| Raise or lower the garage floor | `GarageLayoutConfig.Bus.Up` (buses rest their lowest point on it) |
+| Restyle the garage / HUD / stop cards (plain original style) | `GarageGuiBuilder.lua`, `RouteHudBuilder.lua`, `StopPanel.lua` |
 | Resize stop bays | `RouteConfig.StopBayWidth` / `StopBayLength` / `StopGlowHeight` |
+| Put every stop back on one side | `RouteConfig.AlternateStopSides = false` |
+| Add a track layout to the vote | `TrackLayouts.lua` (one table entry + a `points()` returning a closed ring) |
+| Retune the off-road tow penalty | `DrivingConfig.OffRoad` |
 | Upgrade names changed in the spreadsheet | regenerate `UpgradeCatalog.lua` (don't hand-edit) |
 
 ## Using your bus models
@@ -214,6 +262,15 @@ tunable number lives in a Config file.**
 `BusBuilder` uses real models for any tier that has them and a block
 placeholder for tiers that don't. It works for both the garage and the
 drivable bus.
+
+**You don't need to line your model up vertically.** In the garage the bus is
+placed by measuring its bounding box and resting its lowest point on the floor
+(`GarageLayout.GroundModel`), so a model sits on the ground whatever height its
+pivot happens to be at, and whatever upgrade parts are bolted onto it. Move the
+whole floor with the single number `GarageLayoutConfig.Bus.Up`; no model ever
+needs its own offset. The one thing that will throw it off is a stray part
+hanging below the wheels — an oversized hitbox or an effect emitter — because
+that becomes the lowest point.
 
 ### Rusted → pristine buses (two models per tier)
 

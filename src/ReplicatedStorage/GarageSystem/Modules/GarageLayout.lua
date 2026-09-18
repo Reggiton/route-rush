@@ -40,7 +40,48 @@ local function place(anchorCFrame, offsetCfg)
 	return CFrame.new(position)
 end
 
-function GarageLayout.Compute(anchorCFrame)
+--[[
+	Places a model at groundCFrame with its LOWEST point resting on that plane,
+	whatever its geometry.
+
+	Pivoting every bus to the same height does not work: a model's pivot sits
+	wherever its author put it -- at the axles, at the body centre, halfway up a
+	double-decker -- so one constant height leaves tall models floating and short
+	ones buried. Measuring the model itself means any bus, including ones added
+	later with no tuning, lands on the floor.
+
+	Call this AFTER attaching upgrade parts: they change the bounding box.
+
+	Assumes groundCFrame is yaw-only (the garage never pitches or rolls a bus),
+	so the bounding box's own height is the world-vertical height.
+]]
+function GarageLayout.GroundModel(model, groundCFrame)
+	model:PivotTo(groundCFrame)
+
+	local boxCFrame, boxSize = model:GetBoundingBox()
+	if boxSize.Y <= 0 then
+		return -- nothing to measure; leave it where the pivot put it
+	end
+
+	local bottom = boxCFrame.Position.Y - boxSize.Y / 2
+	local lift = groundCFrame.Position.Y - bottom
+	model:PivotTo(model:GetPivot() + Vector3.new(0, lift, 0))
+end
+
+--[[
+	One entry per parking spot, plus the shared "behind" spot.
+
+	    { spots = { {bus, player, camera}, ... }, behind = CFrame }
+
+	The config describes spot 1. Every other spot is that same arrangement --
+	bus, avatar and camera together -- slid sideways along the anchor's Right
+	axis by SpotSpacing, so each bay frames its bus identically.
+
+	spotCount defaults to 1, which reproduces the old single-stall layout.
+]]
+function GarageLayout.Compute(anchorCFrame, spotCount)
+	spotCount = math.max(spotCount or 1, 1)
+
 	local camPlacement = place(anchorCFrame, GarageLayoutConfig.Camera)
 
 	local aimCfg = GarageLayoutConfig.CameraAim
@@ -48,12 +89,22 @@ function GarageLayout.Compute(anchorCFrame)
 		+ anchorCFrame.LookVector * aimCfg.Forward
 		+ anchorCFrame.RightVector * aimCfg.Right
 		+ Vector3.new(0, aimCfg.Up, 0)
-	local cameraCFrame = CFrame.lookAt(camPlacement.Position, aimPoint)
+
+	local busCFrame = place(anchorCFrame, GarageLayoutConfig.Bus)
+	local playerCFrame = place(anchorCFrame, GarageLayoutConfig.Player)
+
+	local spots = {}
+	for index = 1, spotCount do
+		local shift = anchorCFrame.RightVector * (GarageLayoutConfig.SpotSpacing * (index - 1))
+		spots[index] = {
+			bus = busCFrame + shift,
+			player = playerCFrame + shift,
+			camera = CFrame.lookAt(camPlacement.Position + shift, aimPoint + shift),
+		}
+	end
 
 	return {
-		camera = cameraCFrame,
-		player = place(anchorCFrame, GarageLayoutConfig.Player),
-		bus = place(anchorCFrame, GarageLayoutConfig.Bus),
+		spots = spots,
 		behind = place(anchorCFrame, GarageLayoutConfig.Behind),
 	}
 end

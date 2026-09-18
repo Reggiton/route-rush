@@ -46,28 +46,44 @@ RouteConfig.CurbHeight = 4 -- roadside barriers; taller than any bus's ride heig
 RouteConfig.GrassMargin = 300 -- studs of ground around the loop
 RouteConfig.ObstacleChance = 0.3 -- chance per segment of a parked obstacle
 RouteConfig.GridRowSpacing = 46 -- studs between start grid rows (longest bus is 40)
-RouteConfig.GridSlots = 24 -- 2 per row
+RouteConfig.GridSlots = 24 -- spread across the layout's gridColumns
+RouteConfig.HillAmplitude = 55 -- studs of climb/descent on the Hill Circuit layout
 
 -- Stops & passengers ------------------------------------------------------------------
 RouteConfig.StopCount = 8
--- Each stop is a glowing rectangular bay in the left lane. A bus is "at the stop"
+-- Each stop is a glowing rectangular bay against one kerb. A bus is "at the stop"
 -- while its center is inside the bay -- it's narrower than the road, so drivers
--- have to steer into it.
+-- have to steer into it. Stops alternate sides, so you cross the road each time.
 RouteConfig.StopBayWidth = 12 -- studs across (one lane is RoadWidth / 2 = 14)
 RouteConfig.StopBayLength = 34 -- studs along the road
 RouteConfig.StopBayMargin = 1.5 -- extra tolerance around the bay edges (studs)
 RouteConfig.StopGlowHeight = 2.5 -- low light walls along the bay's sides (0 = none)
+RouteConfig.AlternateStopSides = true -- odd stops on the left kerb, even on the right
 
 -- Boarding on the move ------------------------------------------------------------------
--- Drive through a stop's ring and press (or hold) E to load passengers. You don't
--- have to stop -- but the slower you go, the faster passengers board, and a full
--- stop is fastest. Slow down more = more passengers per stop but fewer stops.
-RouteConfig.MaxBoardSpeed = 50 -- studs/s: at or above this nobody boards or gets off
-RouteConfig.FullStopSpeed = 4 -- studs/s: at or below this counts as fully stopped
-RouteConfig.BoardRateMax = 4 -- passengers/sec when crawling just above a full stop
-RouteConfig.BoardRateCurve = 1.5 -- >1 makes speed matter more (fast drive-bys get very few)
-RouteConfig.FullStopBonus = 1.5 -- boarding rate multiplier when fully stopped
-RouteConfig.MaxBankedBoardings = 3 -- boarding allowance can't pile up beyond this
+-- You never have to stop. How fast you are rolling through a bay decides whether
+-- anyone can get off, and how many you can pick up:
+--
+--     30 mph or under   drop-offs happen, and you can pick up 2
+--     20 mph or under   you can pick up 4
+--     10 mph or under   you can pick up as many as the bus will hold
+--
+-- The cap counts everyone boarded during this visit, so you can take 2 at 30,
+-- brake to 20 and take 2 more. Above the fastest tier nothing happens at all.
+-- Dropping one passenger off is cheap; filling the bus costs you real time.
+-- Thresholds are stored in studs/second -- the unit the game actually measures --
+-- so retuning the speedometer can never silently move them. StudsPerMph is a
+-- DISPLAY conversion only: it turns studs/s into the mph the HUD shows, and the
+-- tier speeds below are chosen to land on round mph numbers under it.
+RouteConfig.StudsPerMph = 1.5 -- display only; 1 stud ~= 0.28 m, so this is close to true
+RouteConfig.DropOffSpeed = 45 -- studs/s (30 mph): at or under this, passengers get off
+-- Order does not matter; Boarding.lua takes the best cap you qualify for.
+-- math.huge means "no limit beyond the bus's own capacity".
+RouteConfig.BoardTiers = {
+	{ speed = 45, board = 2 }, -- 30 mph
+	{ speed = 30, board = 4 }, -- 20 mph
+	{ speed = 15, board = math.huge }, -- 10 mph
+}
 RouteConfig.MaxBoardPerPress = 2 -- passengers one E press can board
 RouteConfig.BoardPressCooldown = 0.1 -- seconds; holding E repeats at this rate
 RouteConfig.WaitingInitial = 8

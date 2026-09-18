@@ -14,16 +14,18 @@
 
 	Track table:
 	  { id, folder, busesFolder, length, points = {Vector3},
-	    stops = { {index, cframe, position, distance, marker} },
+	    stops = { {index, cframe, position, distance, side, marker} },
 	    grid = {CFrame at ground level, facing forward} }
 
-	Traffic drives on the LEFT (Bangladesh), so stops sit on the left lane.
+	Traffic drives on the LEFT (Bangladesh). Stops alternate kerbs -- odd on
+	the left, even on the right -- so a lap means crossing the road.
 ]]
 
 local CollectionService = game:GetService("CollectionService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local RouteConfig = require(ReplicatedStorage.Shared.Config.RouteConfig)
+local TrackLayouts = require(ReplicatedStorage.Shared.Config.TrackLayouts)
 
 local TrackBuilder = {}
 
@@ -31,6 +33,7 @@ local ASPHALT = Color3.fromRGB(50, 50, 55)
 local CURB = Color3.fromRGB(190, 190, 190)
 local GRASS = Color3.fromRGB(90, 130, 70)
 local DASH = Color3.fromRGB(240, 200, 60)
+local EDGE_LINE = Color3.fromRGB(235, 235, 225)
 local RING_COLOR = Color3.fromRGB(255, 205, 70)
 
 local function getInstancesFolder()
@@ -93,11 +96,12 @@ end
 
 --[[
 	An invisible anchor above a stop's ring. Clients find these by the
-	"StopMarker" tag and draw their own billboard on it (StopBillboards.lua),
+	"StopMarker" tag and list them in their own side panel (StopPanel.lua),
 	so each player sees their own drop-offs and deadlines.
-	Attributes: TrackId, StopIndex, Waiting (kept up to date by PassengerService).
+	Attributes: TrackId, StopIndex, Side, Waiting (Waiting kept up to date by
+	PassengerService).
 ]]
-local function addStopMarker(track, index, position)
+local function addStopMarker(track, index, position, side)
 	local marker = Instance.new("Part")
 	marker.Name = "StopMarker_" .. index
 	marker.Anchored = true
@@ -111,6 +115,7 @@ local function addStopMarker(track, index, position)
 	marker:SetAttribute("TrackId", track.id)
 	marker:SetAttribute("StopIndex", index)
 	marker:SetAttribute("Waiting", 0)
+	marker:SetAttribute("Side", side or -1) -- -1 left kerb, 1 right
 	CollectionService:AddTag(marker, "StopMarker")
 	marker.Parent = track.markers
 	return marker
@@ -168,34 +173,31 @@ end
 
 -- Procedural loop -------------------------------------------------------------------------
 
-local function generateLoopPoints(center)
+-- The layout supplies plain-number offsets; we make the Random and keep drawing
+-- from it afterwards (obstacles), so the draw order stays exactly as it was.
+local function generateLoopPoints(center, layout)
 	local rng = Random.new(RouteConfig.TrackSeed)
-	local phase1 = rng:NextNumber(0, math.pi * 2)
-	local phase2 = rng:NextNumber(0, math.pi * 2)
-	local segments = RouteConfig.TrackSegments
+	local offsets = layout.points(rng)
 
 	local points = {}
-	for i = 0, segments - 1 do
-		local angle = i / segments * math.pi * 2
-		local noise = RouteConfig.TrackRadiusNoise * (0.6 * math.sin(2 * angle + phase1) + 0.4 * math.sin(3 * angle + phase2))
-		points[i + 1] = center
-			+ Vector3.new(math.cos(angle) * RouteConfig.TrackRadiusX * (1 + noise), 0, math.sin(angle) * RouteConfig.TrackRadiusZ * (1 + noise))
+	for i, offset in ipairs(offsets) do
+		points[i] = center + Vector3.new(offset.x, offset.y or 0, offset.z)
 	end
 	return points, rng
 end
 
-local function buildProcedural(track, center)
+local function buildProcedural(track, center, layout)
 	local folder = track.folder
 	local roadFolder = Instance.new("Folder")
 	roadFolder.Name = "Road"
 	roadFolder.Parent = folder
 
-	local points, rng = generateLoopPoints(center)
+	local points, rng = generateLoopPoints(center, layout)
 	local cumulative, length = buildCumulative(points)
 	track.points = points
 	track.length = length
 
-	local width = RouteConfig.RoadWidth
+	local width = layout.roadWidth
 	local groundY = RouteConfig.TrackY
 
 	-- Ground
@@ -224,14 +226,26 @@ local function buildProcedural(track, center)
 			Color = ASPHALT,
 			Material = Enum.Material.Asphalt,
 		})
+		-- Curb-less layouts get a painted edge line instead of a wall: leaving the
+		-- road is allowed there, and BusMonitor tows you back for it.
 		for _, side in ipairs({ -1, 1 }) do
-			makePart(
-				roadFolder,
-				"Curb",
-				Vector3.new(1, RouteConfig.CurbHeight, segmentLength),
-				along * CFrame.new(side * (width / 2 + 0.5), RouteConfig.CurbHeight / 2, 0),
-				{ Color = CURB, Material = Enum.Material.Concrete }
-			)
+			if layout.curbs then
+				makePart(
+					roadFolder,
+					"Curb",
+					Vector3.new(1, RouteConfig.CurbHeight, segmentLength),
+					along * CFrame.new(side * (width / 2 + 0.5), RouteConfig.CurbHeight / 2, 0),
+					{ Color = CURB, Material = Enum.Material.Concrete }
+				)
+			else
+				makePart(
+					roadFolder,
+					"EdgeLine",
+					Vector3.new(0.5, 0.1, segmentLength),
+					along * CFrame.new(side * (width / 2 - 0.5), 0.05, 0),
+					{ Color = EDGE_LINE, Material = Enum.Material.SmoothPlastic, CanCollide = false, CanQuery = false, CanTouch = false }
+				)
+			end
 		end
 		makePart(roadFolder, "LaneDash", Vector3.new(0.4, 0.1, segmentLength * 0.45), along * CFrame.new(0, 0.05, 0), {
 			Color = DASH,
@@ -241,41 +255,50 @@ local function buildProcedural(track, center)
 		})
 	end
 
-	-- Start grid (behind the start distance), two columns, one per lane.
-	local startDistance = RouteConfig.GridRowSpacing * math.ceil(RouteConfig.GridSlots / 2) + 40
+	-- Start grid, behind the start distance, spread evenly across the road.
+	-- For two columns this is exactly the old +/- width/4.
+	local columns = layout.gridColumns
+	local rows = math.ceil(RouteConfig.GridSlots / columns)
+	local startDistance = RouteConfig.GridRowSpacing * rows + 40
 	for slot = 1, RouteConfig.GridSlots do
-		local row = math.floor((slot - 1) / 2)
-		local column = (slot - 1) % 2
+		local row = math.floor((slot - 1) / columns)
+		local column = (slot - 1) % columns
 		local position, direction = pointAtDistance(points, cumulative, length, startDistance - row * RouteConfig.GridRowSpacing)
-		local lateral = (column == 0 and -1 or 1) * width / 4
+		local lateral = (column - (columns - 1) / 2) * width / columns
 		track.grid[slot] = laneCFrame(position, direction, lateral)
 	end
 
 	-- Stops, evenly spaced between the start line and the back of the grid
-	-- (so no stop zone overlaps parked buses), on the left lane.
+	-- (so no stop zone overlaps parked buses), alternating kerbs: odd stops on
+	-- the left, even on the right. Crossing the road between them is the point
+	-- -- you cannot just hug one side for a whole lap.
 	local stopsFolder = Instance.new("Folder")
 	stopsFolder.Name = "Stops"
 	stopsFolder.Parent = folder
 
-	local gridBack = startDistance - (math.ceil(RouteConfig.GridSlots / 2) - 1) * RouteConfig.GridRowSpacing
+	local gridBack = startDistance - (rows - 1) * RouteConfig.GridRowSpacing
 	local firstStop = startDistance + 80
 	local usable = (length + gridBack - 80) - firstStop
 	for index = 1, RouteConfig.StopCount do
 		local distance = (firstStop + (index - 1) * usable / math.max(RouteConfig.StopCount - 1, 1)) % length
 		local position, direction = pointAtDistance(points, cumulative, length, distance)
-		local stopCF = laneCFrame(position, direction, -width / 4) -- bay in the left lane
+		-- -1 is the left lane (the side everything used to be on), +1 the right.
+		local side = (RouteConfig.AlternateStopSides and index % 2 == 0) and 1 or -1
+		local stopCF = laneCFrame(position, direction, side * width / 4)
 
 		local stopModel = Instance.new("Model")
 		stopModel.Name = "Stop_" .. index
 		stopModel.Parent = stopsFolder
 
 		addStopBay(stopModel, stopCF)
-		local shelterCF = laneCFrame(position, direction, -(width / 2 + 6))
+		local shelterCF = laneCFrame(position, direction, side * (width / 2 + 6))
 		makePart(stopModel, "Platform", Vector3.new(8, 1, 20), shelterCF * CFrame.new(0, 0.5, 0), {
 			Color = Color3.fromRGB(160, 160, 160),
 			Material = Enum.Material.Concrete,
 		})
-		makePart(stopModel, "Pole", Vector3.new(0.6, 10, 0.6), shelterCF * CFrame.new(2.5, 6, -8), {
+		-- The pole sits on the road-facing edge of the shelter, so it mirrors
+		-- with the side rather than ending up out in the grass.
+		makePart(stopModel, "Pole", Vector3.new(0.6, 10, 0.6), shelterCF * CFrame.new(-side * 2.5, 6, -8), {
 			Color = Color3.fromRGB(40, 120, 60),
 		})
 		makePart(stopModel, "Roof", Vector3.new(8, 0.5, 20), shelterCF * CFrame.new(0, 9, 0), {
@@ -287,7 +310,8 @@ local function buildProcedural(track, center)
 			cframe = stopCF,
 			position = stopCF.Position,
 			distance = distance,
-			marker = addStopMarker(track, index, stopCF.Position),
+			side = side,
+			marker = addStopMarker(track, index, stopCF.Position, side),
 		}
 	end
 
@@ -387,7 +411,10 @@ end
 
 -- Public API ---------------------------------------------------------------------------------------
 
-function TrackBuilder.Build(trackIndex)
+-- layoutId is optional: an unknown or missing one resolves to the default
+-- layout, so callers that don't care keep the original behaviour.
+function TrackBuilder.Build(trackIndex, layoutId)
+	local layout = TrackLayouts.Resolve(layoutId)
 	local center = Vector3.new(RouteConfig.TrackOriginX + (trackIndex - 1) * RouteConfig.TrackSpacing, RouteConfig.TrackY, 0)
 
 	local folder = Instance.new("Folder")
@@ -412,6 +439,7 @@ function TrackBuilder.Build(trackIndex)
 		busesFolder = busesFolder,
 		markers = markers,
 		center = center,
+		layout = layout,
 		length = 0,
 		points = {},
 		stops = {},
@@ -422,10 +450,11 @@ function TrackBuilder.Build(trackIndex)
 	if template then
 		buildFromTemplate(track, template, center)
 	else
-		buildProcedural(track, center)
+		buildProcedural(track, center, layout)
 	end
 
 	folder:SetAttribute("TrackId", trackIndex)
+	folder:SetAttribute("LayoutId", layout.id)
 	folder.Parent = getInstancesFolder()
 	return track
 end
@@ -453,7 +482,8 @@ function TrackBuilder.NearestRoadCFrame(track, position)
 	end
 	local point = track.points[bestIndex]
 	local nextPoint = track.points[bestIndex % #track.points + 1]
-	return laneCFrame(point, (nextPoint - point).Unit, -RouteConfig.RoadWidth / 4)
+	local width = (track.layout and track.layout.roadWidth) or RouteConfig.RoadWidth
+	return laneCFrame(point, (nextPoint - point).Unit, -width / 4)
 end
 
 return TrackBuilder

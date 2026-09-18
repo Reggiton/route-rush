@@ -4,8 +4,8 @@
 	Client side of the route loop. Wires:
 	  - session phase attributes        -> status pill, countdown, ready card
 	  - ProfileUpdated remote           -> profile card (cash / level / XP / rep)
-	  - your bus appearing in the world -> drive controller, chase camera, stop billboards
-	  - RunStateUpdated / StopEvent     -> bus card, boarding card, stop billboards, toasts
+	  - your bus appearing in the world -> drive controller, chase camera, stop panel
+	  - RunStateUpdated / StopEvent     -> bus card, boarding card, stop panel, toasts
 	  - RunResults                      -> results card
 ]]
 
@@ -29,7 +29,7 @@ local Theme = UIKit.Theme
 local RouteHudBuilder = require(script.Parent.RouteHudBuilder)
 local BusDriveController = require(script.Parent.BusDriveController)
 local ChaseCamera = require(script.Parent.ChaseCamera)
-local StopBillboards = require(script.Parent.StopBillboards)
+local StopPanel = require(script.Parent.StopPanel)
 
 local Remotes = ReplicatedStorage:WaitForChild("Remotes")
 local ProfileUpdated = Remotes:WaitForChild("ProfileUpdated")
@@ -38,6 +38,7 @@ local StopEvent = Remotes:WaitForChild("StopEvent")
 local RunStateUpdated = Remotes:WaitForChild("RunStateUpdated")
 local RunResults = Remotes:WaitForChild("RunResults")
 local SetReady = Remotes:WaitForChild("SetReady")
+local SetMapVote = Remotes:WaitForChild("SetMapVote")
 local Notify = Remotes:WaitForChild("Notify")
 
 local hud = RouteHudBuilder.Build(playerGui)
@@ -98,8 +99,8 @@ end)
 
 -- Boarding card --------------------------------------------------------------------------------------
 
--- Shown while your bus is inside a stop's ring. Boarding speed depends on how
--- slow you're going (Boarding.lua); the server decides how many actually board.
+-- Shown while your bus is inside a stop's ring. Your speed sets the cap on how
+-- many you may pick up during this visit (Boarding.lua); the server enforces it.
 local function renderBoardCard(phase, speed)
 	local board = hud.board
 	local visible = myBus ~= nil and runState ~= nil and runState.atStop > 0 and phase == "Running"
@@ -108,26 +109,43 @@ local function renderBoardCard(phase, speed)
 		return
 	end
 
-	local rateFraction = math.clamp(Boarding.RatePerSecond(speed) / math.max(Boarding.RatePerSecond(0), 1e-6), 0, 1)
+	local cap = Boarding.BoardCap(speed)
+	local boarded = runState.boardedThisStop or 0
+	local room = math.max(0, cap - boarded)
+	local unlimited = cap == math.huge
+
+	-- The meter is what this pass still has left in it, not a rate.
+	local roomFraction = 0
+	if unlimited then
+		roomFraction = 1
+	elseif cap > 0 then
+		roomFraction = math.clamp(room / cap, 0, 1)
+	end
+
 	board.title.Text = "STOP " .. runState.atStop
 	board.subtitle.Text = string.format("%d waiting  ·  %s free", runState.waitingAtStop, Format.Count(runState.seatsLeft, "seat"))
-	UIKit.SetFill(board.rateFill, rateFraction, Theme.Colors.Negative:Lerp(Theme.Colors.Positive, rateFraction))
-	board.boardedCount.Text = string.format("%d BOARDED", runState.boardedThisStop or 0)
+	UIKit.SetFill(board.rateFill, roomFraction, Theme.Colors.Negative:Lerp(Theme.Colors.Positive, roomFraction))
+	board.boardedCount.Text = string.format("%d BOARDED", boarded)
 
-	local canBoard = runState.waitingAtStop > 0 and runState.seatsLeft > 0 and Boarding.CanBoard(speed)
+	local canBoard = runState.waitingAtStop > 0 and runState.seatsLeft > 0 and room > 0
 	board.button.Interactable = canBoard
 
+	local nextTier = Boarding.NextTier(speed)
 	local hint, tone
 	if runState.seatsLeft == 0 then
 		hint, tone = "Bus is full", "Warning"
 	elseif runState.waitingAtStop == 0 then
 		hint, tone = "Nobody waiting here", "TextMuted"
-	elseif not Boarding.CanBoard(speed) then
-		hint, tone = string.format("Too fast — slow below %d to board", RouteConfig.MaxBoardSpeed), "Negative"
-	elseif Boarding.IsStopped(speed) then
-		hint, tone = "Stopped — fastest boarding", "Positive"
+	elseif cap <= 0 then
+		hint, tone = string.format("Too fast — get under %d mph", Boarding.Mph(Boarding.MaxBoardSpeed())), "Negative"
+	elseif room <= 0 and nextTier then
+		hint, tone = string.format("Slow to %d mph for more", Boarding.Mph(nextTier.speed)), "Warning"
+	elseif room <= 0 then
+		hint, tone = "That's everyone this pass", "TextMuted"
+	elseif unlimited then
+		hint, tone = "Slow enough for the whole crowd", "Positive"
 	else
-		hint, tone = "Spam or hold E · slower = more passengers", "Text"
+		hint, tone = string.format("Spam or hold E · room for %d more", room), "Text"
 	end
 	board.hint.Text = hint
 	board.hint.TextColor3 = Theme.Colors[tone]
@@ -175,7 +193,7 @@ end)
 
 RunStateUpdated.OnClientEvent:Connect(function(state)
 	runState = state
-	StopBillboards.SetDrops(state.drops, os.clock())
+	StopPanel.SetRunState(state, os.clock())
 end)
 
 StopEvent.OnClientEvent:Connect(function(event)
@@ -192,6 +210,8 @@ StopEvent.OnClientEvent:Connect(function(event)
 		UIKit.Tween(label, { TextTransparency = 0 }, 0.25)
 	elseif event.kind == "impact" then
 		hud.toast(string.format("Hit %s  ·  −%d HP", tostring(event.what), event.damage), "Warning")
+	elseif event.kind == "towed" then
+		hud.toast(string.format("Off the road — towed back (%ds)", event.seconds or 0), "Negative")
 	elseif event.kind == "lost" then
 		hud.toast(string.format("Breakdown!  %s walked off", Format.Count(event.count, "passenger")), "Negative")
 	end
@@ -225,7 +245,7 @@ local function detachBus()
 	runState = nil
 	BusDriveController.Stop()
 	ChaseCamera.Stop()
-	StopBillboards.Clear()
+	StopPanel.Clear()
 	setJumpEnabled(true)
 	hud.bus.panel.Visible = false
 	hud.speed.panel.Visible = false
@@ -238,7 +258,7 @@ local function attachBus(bus)
 	setJumpEnabled(false)
 	ChaseCamera.Start(bus)
 	BusDriveController.Start(bus)
-	StopBillboards.SetTrack(bus:GetAttribute("TrackId"))
+	StopPanel.SetTrack(bus:GetAttribute("TrackId"), bus)
 	hud.bus.panel.Visible = true
 	hud.speed.panel.Visible = true
 end
@@ -298,6 +318,49 @@ local function renderReady(phase)
 	ui.button.BackgroundColor3 = ready and Color3.fromRGB(70, 90, 75) or Color3.fromRGB(50, 140, 70)
 end
 
+-- Map vote ------------------------------------------------------------------------------------------
+
+-- Shown in the lobby while the server is taking votes. Like the ready count,
+-- the tally is computed here from everyone's replicated MapVote attribute
+-- rather than pushed down a remote.
+local function renderVote(phase)
+	local open = ReplicatedStorage:GetAttribute("VoteOpen") == true
+	local visible = not inRace() and open
+	hud.vote.panel.Visible = visible
+	if not visible then
+		return
+	end
+
+	local counts, total = {}, 0
+	for _, other in ipairs(Players:GetPlayers()) do
+		local choice = other:GetAttribute("MapVote")
+		if choice then
+			counts[choice] = (counts[choice] or 0) + 1
+			total = total + 1
+		end
+	end
+
+	local mine = player:GetAttribute("MapVote")
+	local leader = ReplicatedStorage:GetAttribute("VoteLeader")
+
+	for layoutId, row in pairs(hud.vote.rows) do
+		local count = counts[layoutId] or 0
+		local picked = mine == layoutId
+		row.count.Text = count > 0 and tostring(count) or "—"
+		row.button.BackgroundColor3 = picked and Color3.fromRGB(50, 110, 70) or Color3.fromRGB(40, 40, 45)
+		row.name.TextColor3 = layoutId == leader and Theme.Colors.Accent or Color3.new(1, 1, 1)
+		UIKit.SetFill(row.fill, total > 0 and count / total or 0, Theme.Colors.Accent)
+	end
+
+	hud.vote.title.Text = total > 0 and string.format("VOTE NEXT MAP  ·  %d cast", total) or "VOTE NEXT MAP"
+end
+
+for layoutId, row in pairs(hud.vote.rows) do
+	row.button.MouseButton1Click:Connect(function()
+		SetMapVote:FireServer(layoutId)
+	end)
+end
+
 hud.ready.button.MouseButton1Click:Connect(function()
 	SetReady:FireServer(not isReady())
 end)
@@ -345,6 +408,7 @@ RunService.RenderStepped:Connect(function()
 	UIKit.SetFill(status.progress, length and math.clamp(remaining / length, 0, 1) or 0)
 
 	renderReady(phase)
+	renderVote(phase)
 
 	-- Countdown / GO
 	if phase ~= lastPhase then
@@ -380,7 +444,7 @@ RunService.RenderStepped:Connect(function()
 		return
 	end
 
-	hud.speed.value.Text = tostring(math.floor(speed))
+	hud.speed.set(Boarding.Mph(speed))
 	hud.speed.sliding.Visible = telemetry ~= nil and telemetry.sliding
 
 	local card = hud.bus
@@ -393,7 +457,12 @@ RunService.RenderStepped:Connect(function()
 	local health = bus:GetAttribute("Health") or 0
 	local maxHealth = math.max(bus:GetAttribute("MaxHealth") or 1, 1)
 	UIKit.SetFill(card.healthFill, health / maxHealth)
-	if bus:GetAttribute("BrokenDown") then
+	-- A tow also sets BrokenDown (it reuses the same freeze), so check it first
+	-- or being towed reads as engine damage.
+	if bus:GetAttribute("Towing") then
+		card.health.Text = "TOWING…"
+		card.health.TextColor3 = Theme.Colors.Warning
+	elseif bus:GetAttribute("BrokenDown") then
 		card.health.Text = "BROKEN DOWN"
 		card.health.TextColor3 = Theme.Colors.Negative
 	else

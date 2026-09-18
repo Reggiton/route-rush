@@ -72,4 +72,21 @@ DrivingConfig.Collision = {
 	FlipResetSeconds = 3, -- reset if on its side/roof this long
 }
 
+-- Off-road tow-back. Only runs on layouts built without curbs (TrackLayouts):
+-- there is no wall to stop you leaving the road, so leaving it costs time
+-- instead. Deliberately cheaper than a breakdown (5s + 25% of your passengers)
+-- so crashing is never the better option.
+DrivingConfig.OffRoad = {
+	Margin = 8, -- studs past the road edge before you count as off it
+	GraceSeconds = 1.5, -- continuously off-road before the tow fires; clipping a corner is free
+	TowSeconds = 2, -- frozen while the tow truck does its work
+	TowPerStudPerSecond = 0.012, -- extra freeze per studs/s you were doing when you left
+	TowMaxSeconds = 3.5, -- cap, however fast you were going
+	Cooldown = 5, -- seconds before another tow can trigger
+	-- Shoving someone off the road would otherwise be far stronger than shoving
+	-- them into a curb used to be: the victim loses seconds, the rammer loses
+	-- almost nothing. Contact this recently means no tow penalty.
+	ContactGraceSeconds = 2,
+}
+
 return DrivingConfig

@@ -10,6 +10,7 @@
 	  /resetdata  wipe your profile back to defaults
 	  /skip       end the current session phase now
 	  /hp N       set your bus's health to N% (during a route)
+	  /map ID     vote for a track layout (no argument lists the ids)
 ]]
 
 local RunService = game:GetService("RunService")
@@ -20,6 +21,9 @@ end
 local Players = game:GetService("Players")
 local TextChatService = game:GetService("TextChatService")
 local ServerScriptService = game:GetService("ServerScriptService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Notify = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("Notify")
 
 local PlayerDataService = require(ServerScriptService.Services.PlayerDataService)
 local ServerSignals = require(ServerScriptService.Services.ServerSignals)
@@ -53,6 +57,23 @@ local COMMANDS = {
 		local ReadyService = require(ServerScriptService.RouteServer.ReadyService)
 		ReadyService.SetReady(player, true)
 		ServerSignals.SkipPhase:Fire()
+	end,
+	map = function(player, text)
+		-- Force the next race's layout. Testing a map alone is otherwise awkward:
+		-- a one-player vote works, but this saves readying up to see each one.
+		local TrackLayouts = require(ReplicatedStorage.Shared.Config.TrackLayouts)
+		local MapVoteService = require(ServerScriptService.RouteServer.MapVoteService)
+		local wanted = text:match("^/%a+%s+(%S+)")
+		if not wanted or not TrackLayouts.Get(wanted) then
+			local names = {}
+			for _, layout in ipairs(TrackLayouts.List) do
+				table.insert(names, layout.id)
+			end
+			Notify:FireClient(player, "Maps: " .. table.concat(names, ", "))
+			return
+		end
+		MapVoteService.SetVote(player, wanted)
+		Notify:FireClient(player, "Voted " .. TrackLayouts.Get(wanted).name)
 	end,
 	hp = function(player, text)
 		-- Set your bus's health to N% (during a route) to preview damage effects.
@@ -99,4 +120,4 @@ else
 	end
 end
 
-print("[DevCommands] Studio dev commands enabled: /cash N, /rep N, /xp N, /resetdata, /skip, /hp N")
+print("[DevCommands] Studio dev commands enabled: /cash N, /rep N, /xp N, /resetdata, /skip, /hp N, /map ID")
