@@ -61,10 +61,23 @@ DrivingConfig.Collision = {
 	BrakeSlack = 1.5, -- allowed slowdown = brakeDecel * window * BrakeSlack
 	ContactMargin = 1.5, -- studs around the bus checked for something solid
 	DamagePerStudPerSecond = 0.9, -- damage per studs/s of excess slowdown
+	-- Damage also scales with how fast you were going when you hit, not just
+	-- how hard you stopped: at this speed the rate above applies in full,
+	-- half this speed does half the damage.
+	DamageSpeedReference = 60,
 	ImpactCooldown = 0.8, -- seconds before another impact can register
 	BreakdownSeconds = 5,
 	BreakdownPassengerLoss = 0.25, -- fraction of onboard passengers lost
 	BreakdownRepairFraction = 0.5, -- health restored after a breakdown
+	-- Contact damage (RouteWars only -- BusMonitor.Watch opts in per round).
+	-- The slowdown test above needs a real drop in speed, which an arcade bus
+	-- driven by a LinearVelocity constraint often doesn't have: clip a kerb or
+	-- shove another bus and you barely slow, so nothing registers. In a combat
+	-- mode that reads as "crashing does nothing", so there touching anything
+	-- solid above ContactMinSpeed hurts on its own, scaled by that speed.
+	ContactMinSpeed = 22, -- studs/s; slower contact is just a nudge
+	ContactDamagePerStudPerSecond = 0.35,
+
 	SpeedTolerance = 1.3, -- flag above topSpeed * this
 	SpeedStrikesToReset = 8, -- consecutive samples over tolerance before reset
 	MaxTeleportStuds = 60, -- per sample, beyond expected travel

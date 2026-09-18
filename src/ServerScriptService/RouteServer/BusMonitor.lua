@@ -263,6 +263,36 @@ local function sample(player, record, now)
 		state.speedStrikes = 0
 	end
 
+	-- Contact damage, for rounds that opt in (RouteWars). Touching anything
+	-- solid above ContactMinSpeed hurts on its own, scaled by that speed --
+	-- the slowdown test below never fires for a kerb clip or a shove, because
+	-- the drive controller's velocity constraint keeps the bus moving.
+	if callbacks.contactDamage and now >= state.cooldownUntil
+		and not bus:GetAttribute("BrokenDown") and recentSpeed >= C.ContactMinSpeed then
+		local contact = findContact(player, bus, root)
+		if contact then
+			state.cooldownUntil = now + C.ImpactCooldown
+			local damage = math.max(1, math.floor(recentSpeed * C.ContactDamagePerStudPerSecond * stats.damageMult + 0.5))
+			local health = math.max(0, (bus:GetAttribute("Health") or stats.maxHealth) - damage)
+			bus:SetAttribute("Health", health)
+
+			local owner = contact:FindFirstAncestorWhichIsA("Model")
+			local what = contact.Name
+			if owner and owner:GetAttribute("OwnerUserId") then
+				state.lastContactAt = now
+				what = "another bus"
+			end
+			StopEvent:FireClient(player, { kind = "impact", damage = damage, what = what })
+			if callbacks.onImpact then
+				callbacks.onImpact(player, damage)
+			end
+			if health <= 0 then
+				breakDown(player, bus, stats, callbacks)
+			end
+			return
+		end
+	end
+
 	local beforeEntry = entryAtAge(history, recentEntry.t, C.BeforeWindow)
 	local beforeSpan = recentEntry.t - beforeEntry.t
 	if beforeSpan < C.BeforeWindow * 0.5 then
@@ -293,7 +323,10 @@ local function sample(player, record, now)
 	end
 
 	state.cooldownUntil = now + C.ImpactCooldown
-	local damage = math.max(1, math.floor(excess * C.DamagePerStudPerSecond * stats.damageMult + 0.5))
+	-- Scaled by how fast you were going as well as how hard you stopped, so a
+	-- highway-speed crash hurts far more than the same stop at a crawl.
+	local speedFactor = beforeSpeed / C.DamageSpeedReference
+	local damage = math.max(1, math.floor(excess * C.DamagePerStudPerSecond * speedFactor * stats.damageMult + 0.5))
 	local health = math.max(0, (bus:GetAttribute("Health") or stats.maxHealth) - damage)
 	bus:SetAttribute("Health", health)
 

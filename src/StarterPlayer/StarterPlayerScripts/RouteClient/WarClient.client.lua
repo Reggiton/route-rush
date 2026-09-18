@@ -26,26 +26,23 @@ local WarHudBuilder = require(script.Parent.WarHudBuilder)
 
 local Remotes = ReplicatedStorage:WaitForChild("Remotes")
 local ProfileUpdated = Remotes:WaitForChild("ProfileUpdated")
-local SetWarReady = Remotes:WaitForChild("SetWarReady")
 local RequestBuyArmoryItem = Remotes:WaitForChild("RequestBuyArmoryItem")
 local RequestUseWarItem = Remotes:WaitForChild("RequestUseWarItem")
 local WaterSplash = Remotes:WaitForChild("WaterSplash")
 
 local hud = WarHudBuilder.Build(playerGui)
 
-local PHASE_TEXT = {
-	Intermission = "Next war",
-	Waiting = "Waiting for fighters",
-	Countdown = "Get ready",
-	Running = "War ends in",
-	Results = "Back to lobby",
-}
-
 local snapshot -- last ProfileUpdated payload (cash, warInventory)
 local armoryOpen = false
 
 local function inWar()
 	return player:GetAttribute("InWar") == true
+end
+
+-- Everything this HUD draws belongs to the war lobby, so it's only on
+-- screen while you're standing in the RouteWars zone or racing a war.
+local function warContext()
+	return inWar() or player:GetAttribute("InWarZone") == true
 end
 
 -- Profile / inventory ------------------------------------------------------------------------------
@@ -86,42 +83,18 @@ for itemId, row in pairs(hud.armory.items) do
 	end)
 end
 
+-- The shop is for kitting out before a war: in the zone, out of a race.
 local function refreshArmoryButton()
-	hud.armoryButton.Visible = not player:GetAttribute("InRace")
-	if player:GetAttribute("InRace") then
+	local available = warContext() and not player:GetAttribute("InRace")
+	hud.armoryButton.Visible = available
+	if not available then
 		setArmoryOpen(false)
 	end
 end
 player:GetAttributeChangedSignal("InRace"):Connect(refreshArmoryButton)
+player:GetAttributeChangedSignal("InWar"):Connect(refreshArmoryButton)
+player:GetAttributeChangedSignal("InWarZone"):Connect(refreshArmoryButton)
 refreshArmoryButton()
-
--- Ready / Leave war ---------------------------------------------------------------------------------
-
-hud.leaveWarButton.MouseButton1Click:Connect(function()
-	SetWarReady:FireServer(false)
-end)
-
-local function renderReady()
-	local racing = inWar()
-	hud.leaveWarButton.Visible = racing
-	hud.warReady.panel.Visible = not racing
-	if racing then
-		return
-	end
-
-	local readyCount, total = 0, 0
-	for _, other in ipairs(Players:GetPlayers()) do
-		total = total + 1
-		if other:GetAttribute("WarReady") == true then
-			readyCount = readyCount + 1
-		end
-	end
-
-	local zoned = player:GetAttribute("WarReady") == true
-	hud.warReady.status.Text = zoned
-		and string.format("In the zone — %d of %d ready", readyCount, total)
-		or "Walk into the RouteWars zone to join"
-end
 
 -- Hotbar --------------------------------------------------------------------------------------------
 
@@ -182,14 +155,6 @@ end)
 -- Per-frame ------------------------------------------------------------------------------------------
 
 RunService.RenderStepped:Connect(function()
-	local phase = ReplicatedStorage:GetAttribute("WarSessionPhase") or "Intermission"
-	local endsAt = ReplicatedStorage:GetAttribute("WarPhaseEndsAt") or 0
-	local remaining = endsAt - workspace:GetServerTimeNow()
-
-	hud.status.phase.Text = "ROUTE WARS · " .. string.upper(PHASE_TEXT[phase] or phase)
-	hud.status.timer.Text = phase == "Waiting" and "—" or Format.Time(remaining)
-
-	renderReady()
 	hud.hotbar.panel.Visible = inWar()
 
 	-- Water splash overlay: decays on its own, wipes clear it faster.

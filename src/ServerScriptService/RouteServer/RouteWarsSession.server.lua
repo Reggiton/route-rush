@@ -4,7 +4,8 @@
 	The RouteWars round loop: a second, independent copy of RouteSession's
 	Intermission -> Countdown -> Running -> Results loop, running in
 	parallel with the regular one. Standing in the "RouteWarsZone" part
-	(RouteWarsZoneService) is this loop's Ready button (WarReadyService).
+	(RouteWarsZoneService) switches a player's lobby over to this loop --
+	same HUD, same ready-up, same map vote, just pointed here.
 
 	It shares almost everything with the regular loop -- the same
 	TrackBuilder maps, BusSpawner buses, PassengerService stops/fares, and
@@ -13,11 +14,11 @@
 	PassengerService.AddTracks/RemoveTracks, and RunScoring.Begin/Finish for
 	how those shared services stay correct with two rounds live at once.
 
-	Only ever builds ONE track (no brackets, no map vote -- always
-	RouteWarsConfig.LayoutId or the default layout). Phase is published
-	under its own attribute names so the regular HUD and the war HUD never
-	collide:
-	  WarSessionPhase, WarPhaseEndsAt
+	Only ever builds ONE track (no brackets), on whichever layout its own
+	lobby voted for (WarMapVoteService), or RouteWarsConfig.LayoutId if one
+	is forced. State is published under its own attribute names so the two
+	lobbies never read each other's:
+	  WarSessionPhase, WarPhaseEndsAt, WarMapLayout
 ]]
 
 local Players = game:GetService("Players")
@@ -38,6 +39,7 @@ local BusMonitor = require(RouteServer.BusMonitor)
 local PassengerService = require(RouteServer.PassengerService)
 local RunScoring = require(RouteServer.RunScoring)
 local WarReadyService = require(RouteServer.WarReadyService)
+local WarMapVoteService = require(RouteServer.WarMapVoteService)
 local WeaponService = require(RouteServer.WeaponService)
 local RouteWarsZoneService = require(RouteServer.RouteWarsZoneService)
 
@@ -138,6 +140,7 @@ local function removeFromRound(player)
 	BusSpawner.Despawn(player)
 	player:SetAttribute("TrackId", nil)
 	player:SetAttribute("InWar", false)
+	player:SetAttribute("InWarZone", false)
 	LobbyBuilder.SendToLobby(player)
 end
 
@@ -174,6 +177,7 @@ local function runLobby()
 	local minimum = RouteWarsConfig.MinReadyToStart
 	local endsAt = os.clock() + RouteWarsConfig.IntermissionSeconds
 	setPhase("Intermission", RouteWarsConfig.IntermissionSeconds)
+	WarMapVoteService.Begin()
 	skipRequested = false
 
 	while true do
@@ -223,8 +227,13 @@ local function runRound(participants)
 	}
 	currentRound = round
 
+	-- The vote closes here, the last moment before the track exists, so a
+	-- late voter still counts. A configured LayoutId overrides the vote.
 	setPhase("Countdown", RouteWarsConfig.CountdownSeconds)
-	local track = TrackBuilder.Build(RouteWarsConfig.TrackIndex, RouteWarsConfig.LayoutId)
+	local layoutId = RouteWarsConfig.LayoutId or WarMapVoteService.Close()
+	ReplicatedStorage:SetAttribute("WarMapLayout", layoutId)
+
+	local track = TrackBuilder.Build(RouteWarsConfig.TrackIndex, layoutId)
 	round.track = track
 
 	for _, player in ipairs(participants) do
@@ -249,6 +258,10 @@ local function runRound(participants)
 	PassengerService.AddTracks({ track })
 	WeaponService.StartRound(track)
 	round.monitor = BusMonitor.Watch({ track.id }, {
+		-- Ramming is the point here, so solid contact at speed damages you
+		-- directly rather than waiting for a slowdown that arcade physics
+		-- mostly absorbs (DrivingConfig.Collision.ContactMinSpeed).
+		contactDamage = true,
 		onImpact = function(player)
 			RunScoring.AddCollision(player)
 		end,
@@ -288,15 +301,17 @@ local function runRound(participants)
 	for _, player in ipairs(racerList) do
 		BusSpawner.Despawn(player)
 	end
+	ReplicatedStorage:SetAttribute("WarMapLayout", nil)
 	TrackBuilder.Destroy(track)
 	for _, player in ipairs(racerList) do
 		if player.Parent == Players then
 			player:SetAttribute("TrackId", nil)
 			player:SetAttribute("InWar", false)
+			player:SetAttribute("InWarZone", false)
 			LobbyBuilder.SendToLobby(player)
-			-- Readiness here is proxied by standing in the zone, not a
-			-- persistent toggle: you're back in the lobby now, away from
-			-- it, so don't silently pull you into the next war too.
+			-- Back in the regular lobby, out of the zone: drop the war
+			-- readiness and the war HUD rather than silently queueing them
+			-- for the next war from the wrong lobby.
 			WarReadyService.SetReady(player, false)
 		end
 	end
@@ -333,6 +348,7 @@ while true do
 				if player.Parent == Players then
 					player:SetAttribute("TrackId", nil)
 					player:SetAttribute("InWar", false)
+					player:SetAttribute("InWarZone", false)
 					LobbyBuilder.SendToLobby(player)
 					WarReadyService.SetReady(player, false)
 				end

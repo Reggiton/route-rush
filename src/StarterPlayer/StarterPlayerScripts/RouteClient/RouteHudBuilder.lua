@@ -479,6 +479,7 @@ function RouteHudBuilder.Build(playerGui)
 			Font = Enum.Font.GothamBlack,
 			TextColor3 = YELLOW,
 		})
+		local closeButton = button(panel, "Close", "✕", UDim2.fromOffset(32, 32), UDim2.new(1, -42, 0, 10), Color3.fromRGB(70, 70, 78))
 		local total = label(panel, "Total", "", UDim2.new(1, -20, 0, 36), UDim2.fromOffset(10, 56), {
 			TextColor3 = GREEN,
 		})
@@ -495,7 +496,11 @@ function RouteHudBuilder.Build(playerGui)
 		})
 
 		local rowOrder = 0
-		local results = { panel = panel, total = total, footer = footer }
+		local results = { panel = panel, total = total, footer = footer, closeButton = closeButton }
+
+		closeButton.MouseButton1Click:Connect(function()
+			panel.Visible = false
+		end)
 
 		function results.clear()
 			rowOrder = 0

@@ -19,6 +19,7 @@ local playerGui = player:WaitForChild("PlayerGui")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local RouteConfig = require(Shared.Config.RouteConfig)
+local RouteWarsConfig = require(Shared.Config.RouteWarsConfig)
 local Boarding = require(Shared.Modules.Boarding)
 
 local UI = script.Parent.Parent:WaitForChild("UI")
@@ -38,7 +39,9 @@ local StopEvent = Remotes:WaitForChild("StopEvent")
 local RunStateUpdated = Remotes:WaitForChild("RunStateUpdated")
 local RunResults = Remotes:WaitForChild("RunResults")
 local SetReady = Remotes:WaitForChild("SetReady")
+local SetWarReady = Remotes:WaitForChild("SetWarReady")
 local SetMapVote = Remotes:WaitForChild("SetMapVote")
+local SetWarMapVote = Remotes:WaitForChild("SetWarMapVote")
 local Notify = Remotes:WaitForChild("Notify")
 
 local hud = RouteHudBuilder.Build(playerGui)
@@ -57,15 +60,42 @@ local PHASE_TEXT = {
 	Results = "Back to lobby",
 }
 
-local PHASE_LENGTH = {
-	Intermission = RouteConfig.IntermissionSeconds,
-	Countdown = RouteConfig.CountdownSeconds,
-	Running = RouteConfig.RunSeconds,
-	Results = RouteConfig.ResultsSeconds,
+local WAR_PHASE_TEXT = {
+	Intermission = "Next war",
+	Waiting = "Waiting for fighters",
+	Countdown = "Get ready",
+	Running = "War ends in",
+	Results = "Back to lobby",
 }
+
+-- Per loop, so the phase progress bar fills against the right total: the
+-- two loops run different length phases.
+local function phaseLengths(config)
+	return {
+		Intermission = config.IntermissionSeconds,
+		Countdown = config.CountdownSeconds,
+		Running = config.RunSeconds,
+		Results = config.ResultsSeconds,
+	}
+end
+
+local PHASE_LENGTH = phaseLengths(RouteConfig)
+local WAR_PHASE_LENGTH = phaseLengths(RouteWarsConfig)
 
 local function inRace()
 	return player:GetAttribute("InRace") == true
+end
+
+local function inWar()
+	return player:GetAttribute("InWar") == true
+end
+
+-- Which loop this HUD is showing right now. Standing in the RouteWars zone
+-- (or racing a war) swaps the whole lobby over to the war loop -- same
+-- widgets, same behaviour, just pointed at WarReady / WarMapVote /
+-- WarSessionPhase -- so the two lobbies are never on screen together.
+local function warContext()
+	return inWar() or player:GetAttribute("InWarZone") == true
 end
 
 -- Profile -----------------------------------------------------------------------------------------
@@ -281,35 +311,40 @@ end)
 -- Ready card --------------------------------------------------------------------------------------------
 
 local function isReady()
-	return player:GetAttribute("Ready") == true
+	local attribute = warContext() and "WarReady" or "Ready"
+	return player:GetAttribute(attribute) == true
 end
 
 local function renderReady(phase)
 	local racing = inRace()
+	local war = warContext()
 	hud.leaveButton.Visible = racing
+	hud.leaveButton.Text = inWar() and "Leave war" or "Leave race"
 	hud.ready.panel.Visible = not racing
 	if racing then
 		return
 	end
 
 	local ready = isReady()
+	local readyAttribute = war and "WarReady" or "Ready"
 	local readyCount, total = 0, 0
 	for _, other in ipairs(Players:GetPlayers()) do
 		total = total + 1
-		if other:GetAttribute("Ready") == true then
+		if other:GetAttribute(readyAttribute) == true then
 			readyCount = readyCount + 1
 		end
 	end
 
+	local noun = war and "war" or "race"
 	local ui = hud.ready
 	if phase == "Countdown" or phase == "Running" then
-		ui.title.Text = "Race in progress"
-		ui.status.Text = ready and "Dropping you in…" or "Jump in now — you'll race the time that's left"
-		ui.button.Text = ready and "Cancel" or "Join race"
+		ui.title.Text = war and "War in progress" or "Race in progress"
+		ui.status.Text = ready and "Dropping you in…" or ("Jump in now — you'll " .. noun .. " the time that's left")
+		ui.button.Text = ready and "Cancel" or ("Join " .. noun)
 	else
-		ui.title.Text = "Next race"
+		ui.title.Text = war and "Next war" or "Next race"
 		if phase == "Waiting" and readyCount == 0 then
-			ui.status.Text = "No race starts until someone readies up"
+			ui.status.Text = "No " .. noun .. " starts until someone readies up"
 		else
 			ui.status.Text = string.format("%d of %d players ready", readyCount, total)
 		end
@@ -324,7 +359,9 @@ end
 -- the tally is computed here from everyone's replicated MapVote attribute
 -- rather than pushed down a remote.
 local function renderVote(phase)
-	local open = ReplicatedStorage:GetAttribute("VoteOpen") == true
+	local war = warContext()
+	local voteAttribute = war and "WarMapVote" or "MapVote"
+	local open = ReplicatedStorage:GetAttribute(war and "WarVoteOpen" or "VoteOpen") == true
 	local visible = not inRace() and open
 	hud.vote.panel.Visible = visible
 	if not visible then
@@ -333,15 +370,15 @@ local function renderVote(phase)
 
 	local counts, total = {}, 0
 	for _, other in ipairs(Players:GetPlayers()) do
-		local choice = other:GetAttribute("MapVote")
+		local choice = other:GetAttribute(voteAttribute)
 		if choice then
 			counts[choice] = (counts[choice] or 0) + 1
 			total = total + 1
 		end
 	end
 
-	local mine = player:GetAttribute("MapVote")
-	local leader = ReplicatedStorage:GetAttribute("VoteLeader")
+	local mine = player:GetAttribute(voteAttribute)
+	local leader = ReplicatedStorage:GetAttribute(war and "WarVoteLeader" or "VoteLeader")
 
 	for layoutId, row in pairs(hud.vote.rows) do
 		local count = counts[layoutId] or 0
@@ -352,20 +389,35 @@ local function renderVote(phase)
 		UIKit.SetFill(row.fill, total > 0 and count / total or 0, Theme.Colors.Accent)
 	end
 
-	hud.vote.title.Text = total > 0 and string.format("VOTE NEXT MAP  ·  %d cast", total) or "VOTE NEXT MAP"
+	local caption = war and "VOTE NEXT WAR MAP" or "VOTE NEXT MAP"
+	hud.vote.title.Text = total > 0 and string.format("%s  ·  %d cast", caption, total) or caption
 end
 
 for layoutId, row in pairs(hud.vote.rows) do
 	row.button.MouseButton1Click:Connect(function()
-		SetMapVote:FireServer(layoutId)
+		if warContext() then
+			SetWarMapVote:FireServer(layoutId)
+		else
+			SetMapVote:FireServer(layoutId)
+		end
 	end)
 end
 
 hud.ready.button.MouseButton1Click:Connect(function()
-	SetReady:FireServer(not isReady())
+	if warContext() then
+		SetWarReady:FireServer(not isReady())
+	else
+		SetReady:FireServer(not isReady())
+	end
 end)
+-- One Leave button for both loops: which race you're in decides which
+-- readiness it drops.
 hud.leaveButton.MouseButton1Click:Connect(function()
-	SetReady:FireServer(false)
+	if inWar() then
+		SetWarReady:FireServer(false)
+	else
+		SetReady:FireServer(false)
+	end
 end)
 
 -- Countdown ------------------------------------------------------------------------------------------------
@@ -394,17 +446,26 @@ end
 
 local lastPhase
 RunService.RenderStepped:Connect(function()
-	local phase = ReplicatedStorage:GetAttribute("SessionPhase") or "Intermission"
-	local endsAt = ReplicatedStorage:GetAttribute("PhaseEndsAt") or 0
+	-- In the war lobby or a war race, everything phase-driven here (the
+	-- timer, the countdown, and critically the boarding panel and its E
+	-- binding) follows the WAR loop -- the regular loop's phase has nothing
+	-- to do with the lobby you're standing in or the race you're in.
+	local war = warContext()
+	local phase = (war and ReplicatedStorage:GetAttribute("WarSessionPhase"))
+		or ReplicatedStorage:GetAttribute("SessionPhase")
+		or "Intermission"
+	local endsAt = (war and ReplicatedStorage:GetAttribute("WarPhaseEndsAt"))
+		or ReplicatedStorage:GetAttribute("PhaseEndsAt")
+		or 0
 	local remaining = endsAt - workspace:GetServerTimeNow()
 	local racing = inRace()
 
 	-- Status pill
 	local status = hud.status
-	status.phase.Text = string.upper(PHASE_TEXT[phase] or phase)
+	status.phase.Text = string.upper((war and WAR_PHASE_TEXT or PHASE_TEXT)[phase] or phase)
 	status.timer.Text = phase == "Waiting" and "—" or Format.Time(remaining)
 	status.fares.Visible = racing and phase == "Running"
-	local length = PHASE_LENGTH[phase]
+	local length = (war and WAR_PHASE_LENGTH or PHASE_LENGTH)[phase]
 	UIKit.SetFill(status.progress, length and math.clamp(remaining / length, 0, 1) or 0)
 
 	renderReady(phase)

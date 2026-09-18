@@ -44,6 +44,7 @@ local REMOTE_NAMES = {
 
 	-- RouteWars
 	"SetWarReady",
+	"SetWarMapVote",
 	"RequestBuyArmoryItem",
 	"RequestUseWarItem",
 	"WaterSplash",

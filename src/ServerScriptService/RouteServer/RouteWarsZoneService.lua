@@ -3,19 +3,26 @@
 
 	Watches a part named "RouteWarsZone" somewhere in Workspace (build it in
 	Studio -- any size, shape, or orientation; it's checked as an oriented
-	box, not necessarily axis-aligned). Standing inside it marks you Ready
-	for the RouteWars loop, the same as ReadyService's button does for the
-	regular one; stepping out clears it. Only touches WarReady while you are
-	not already racing in EITHER loop -- once RouteWarsSession seats you in
-	a war bus you're physically moved to the war track, nowhere near this
-	part, so there's nothing left for the zone to watch for you until you're
-	back in the lobby.
+	box, not necessarily axis-aligned).
+
+	Standing inside it switches you to the RouteWars lobby: the attribute
+	"InWarZone" is what the HUD reads to decide whether to show the war
+	lobby (ready-up + map vote for the war loop) or the regular one. It is
+	NOT readiness -- you still press Ready, exactly as in the regular lobby.
+	The two lobbies are exclusive: crossing the boundary drops your
+	readiness for the one you left, so neither loop can pull you into a
+	race out of a lobby you're no longer looking at.
+
+	Only touched while you are not already racing in EITHER loop -- once
+	RouteWarsSession seats you in a war bus you're physically moved to the
+	war track, nowhere near this part, and "InWar" takes over for the HUD.
 ]]
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 
 local RouteWarsConfig = require(game:GetService("ReplicatedStorage").Shared.Config.RouteWarsConfig)
+local ReadyService = require(script.Parent.ReadyService)
 local WarReadyService = require(script.Parent.WarReadyService)
 
 local RouteWarsZoneService = {}
@@ -43,16 +50,28 @@ local function isInside(part, position)
 end
 
 local function setInZone(player, value)
-	if inZone[player] == value then
-		return
-	end
 	inZone[player] = value
-	-- Only auto-manage WarReady while the player is in neither loop's race;
-	-- ignore transitions while they're actively racing (regular or war).
+	-- Ignore this while they're actively racing (regular or war): being
+	-- seated on a track moves them away from the part, which isn't a
+	-- decision to leave the war lobby.
 	if player:GetAttribute("InRace") then
 		return
 	end
-	WarReadyService.SetReady(player, value)
+	-- Reconciled every tick rather than only on a transition: a race ends
+	-- with the player back in the lobby but the attribute still set from
+	-- before it started, and nothing else would clear it.
+	if player:GetAttribute("InWarZone") ~= value then
+		player:SetAttribute("InWarZone", value)
+	end
+	-- The two lobbies are exclusive, so readiness for the one you just left
+	-- is dropped either way -- otherwise that loop would yank you into a
+	-- race out of the lobby you're no longer looking at. Both SetReady
+	-- calls no-op when the value is already false.
+	if value then
+		ReadyService.SetReady(player, false)
+	else
+		WarReadyService.SetReady(player, false)
+	end
 end
 
 local function step()

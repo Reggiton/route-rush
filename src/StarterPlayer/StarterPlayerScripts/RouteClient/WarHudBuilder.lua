@@ -93,77 +93,44 @@ function WarHudBuilder.Build(playerGui)
 
 	local hud = { screenGui = screenGui }
 
-	-- Status pill (top-right) --------------------------------------------------------------
-	do
-		local panel = frame(screenGui, "WarStatus", UDim2.fromOffset(230, 46), UDim2.new(1, -20, 0, 8), {
-			AnchorPoint = Vector2.new(1, 0),
-			BackgroundTransparency = 0.15,
-		})
-		corner(panel)
-		local phase = label(panel, "Phase", "ROUTE WARS", UDim2.fromOffset(140, 20), UDim2.fromOffset(12, 4), {
-			TextXAlignment = Enum.TextXAlignment.Left,
-			TextColor3 = RED,
-		})
-		local timer = label(panel, "Timer", "", UDim2.fromOffset(140, 18), UDim2.fromOffset(12, 24), {
-			TextXAlignment = Enum.TextXAlignment.Left,
-		})
-		local armoryButton = button(panel, "ArmoryButton", "Armory", UDim2.fromOffset(80, 34), UDim2.fromOffset(140, 6), Color3.fromRGB(150, 60, 55))
-		hud.status = { panel = panel, phase = phase, timer = timer }
-		hud.armoryButton = armoryButton
-	end
+	-- Armory button (top-right). The war lobby's phase pill, ready card and
+	-- map vote are the REGULAR HUD's own widgets, switched over to the war
+	-- loop while you're in the zone (RouteClient.warContext), so the only
+	-- thing this HUD adds up here is the shop.
+	hud.armoryButton = button(screenGui, "ArmoryButton", "Armory", UDim2.fromOffset(110, 40), UDim2.new(1, -20, 0, 60), Color3.fromRGB(150, 60, 55))
+	hud.armoryButton.AnchorPoint = Vector2.new(1, 0)
+	hud.armoryButton.Visible = false
 
-	-- Ready-for-war card (bottom-right, lobby) ---------------------------------------------
+	-- Item hotbar (right edge, war racing only). Stacked vertically and
+	-- right-aligned so it stays clear of the boarding panel at the bottom
+	-- centre and the speedometer at the bottom right.
 	do
-		local panel = frame(screenGui, "WarReady", UDim2.fromOffset(240, 100), UDim2.new(1, -20, 1, -120), {
-			AnchorPoint = Vector2.new(1, 0),
-			BackgroundTransparency = 0.15,
-		})
-		corner(panel)
-		local title = label(panel, "Title", "RouteWars", UDim2.fromOffset(220, 20), UDim2.fromOffset(10, 8), {
-			TextXAlignment = Enum.TextXAlignment.Left,
-			TextColor3 = RED,
-		})
-		local status = label(panel, "Status", "Walk into the RouteWars zone", UDim2.fromOffset(220, 34), UDim2.fromOffset(10, 30), {
-			TextXAlignment = Enum.TextXAlignment.Left,
-			TextColor3 = MUTED,
-			Font = Enum.Font.Gotham,
-			TextWrapped = true,
-		})
-		hud.warReady = { panel = panel, title = title, status = status }
-	end
-
-	-- Leave war (bottom-right, racing) -------------------------------------------------------
-	hud.leaveWarButton = button(screenGui, "LeaveWar", "Leave war", UDim2.fromOffset(140, 44), UDim2.new(1, -20, 1, -64), Color3.fromRGB(150, 50, 45))
-	hud.leaveWarButton.AnchorPoint = Vector2.new(1, 0)
-	hud.leaveWarButton.Visible = false
-
-	-- Item hotbar (sits just above the regular boarding panel, war racing only) --------------
-	do
-		local SLOT = 84
+		local ROW_H = 34
 		local count = #ArmoryConfig.Items
-		local width = count * SLOT + (count - 1) * 8
-		local panel = frame(screenGui, "Hotbar", UDim2.fromOffset(width, 96), UDim2.new(0.5, -width / 2, 1, -256), {
+		local height = count * ROW_H + (count - 1) * 4
+		local panel = frame(screenGui, "Hotbar", UDim2.fromOffset(190, height), UDim2.new(1, -20, 0.5, 0), {
+			AnchorPoint = Vector2.new(1, 0.5),
 			BackgroundTransparency = 1,
 			Visible = false,
 		})
 
 		local slots = {}
 		for index, item in ipairs(ArmoryConfig.Items) do
-			local x = (index - 1) * (SLOT + 8)
-			local slot = frame(panel, item.id, UDim2.fromOffset(SLOT, 96), UDim2.fromOffset(x, 0), {
-				BackgroundTransparency = 0.1,
+			local y = (index - 1) * (ROW_H + 4)
+			local slot = frame(panel, item.id, UDim2.fromOffset(190, ROW_H), UDim2.fromOffset(0, y), {
+				BackgroundTransparency = 0.15,
 			})
-			corner(slot)
-			label(slot, "Key", tostring(index), UDim2.fromOffset(24, 18), UDim2.fromOffset(4, 2), {
-				TextColor3 = MUTED,
+			corner(slot, 6)
+			label(slot, "Key", tostring(index), UDim2.fromOffset(20, 18), UDim2.fromOffset(8, 8), {
+				TextColor3 = YELLOW,
 				TextXAlignment = Enum.TextXAlignment.Left,
 			})
-			label(slot, "Name", item.name, UDim2.new(1, -8, 0, 30), UDim2.fromOffset(4, 18), {
-				TextWrapped = true,
-				TextScaled = true,
+			label(slot, "Name", item.name, UDim2.fromOffset(120, 18), UDim2.fromOffset(30, 8), {
+				TextXAlignment = Enum.TextXAlignment.Left,
 			})
-			local count_ = label(slot, "Count", "0", UDim2.new(1, -8, 0, 26), UDim2.fromOffset(4, 62), {
+			local count_ = label(slot, "Count", "0", UDim2.fromOffset(34, 18), UDim2.new(1, -40, 0, 8), {
 				TextColor3 = GREEN,
+				TextXAlignment = Enum.TextXAlignment.Right,
 			})
 			slots[item.id] = { frame = slot, count = count_ }
 		end

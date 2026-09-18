@@ -33,7 +33,8 @@ RouteWarsConfig.MidRaceJoinDelay = 1.5
 -- track physically separate without pushing it far enough from the origin
 -- to hurt physics precision.
 RouteWarsConfig.TrackIndex = 10
--- nil = TrackLayouts.DefaultId. RouteWars skips the lobby map vote entirely.
+-- Set a layout id to force every war onto that map; nil means the war
+-- lobby's own map vote (WarMapVoteService) decides, like the regular one.
 RouteWarsConfig.LayoutId = nil
 
 -- Zone ----------------------------------------------------------------------------
