@@ -244,7 +244,20 @@ local function step(dt)
 	-- here if you were never hit). "Until" timestamps are server time, since
 	-- WeaponService is a server script and this clock has to agree with it.
 	local now = workspace:GetServerTimeNow()
-	local topSpeedMult, accelMult, gripMult = 1, 1, 1
+	local topSpeedMult, accelMult, gripMult, steerMult = 1, 1, 1, 1
+
+	-- Limping after a breakdown: one system comes back wrong and recovers
+	-- over DrivingConfig.Impair.Seconds. Which one is decided by the server
+	-- (BusMonitor) so it can't be wished away by the client.
+	local impairUntil = bus:GetAttribute("ImpairUntil")
+	if impairUntil and now < impairUntil then
+		local kind = bus:GetAttribute("ImpairKind")
+		if kind == "Accel" then
+			accelMult = accelMult * DrivingConfig.Impair.AccelMultiplier
+		elseif kind == "Steer" then
+			steerMult = steerMult * DrivingConfig.Impair.SteerMultiplier
+		end
+	end
 	local boostUntil = bus:GetAttribute("BoostUntil")
 	if boostUntil and now < boostUntil then
 		topSpeedMult = topSpeedMult * (bus:GetAttribute("BoostSpeedMult") or 1)
@@ -411,6 +424,7 @@ function BusDriveController.Start(bus)
 		rayParams = rayParams,
 		heading = 0,
 		sliding = false,
+		steerSmoothed = 0,
 		calm = 0,
 		speed = 0,
 		throttle = 0,

@@ -22,12 +22,48 @@ DrivingConfig.PerLevel = {
 }
 
 -- Penalty at 100% load (full capacity). Scales linearly with load.
+-- A full bus should feel like a boat: slow to wind up, late to stop, and
+-- unwilling to change direction. Grip on its own is hard to feel (it only
+-- bites at the moment traction breaks), so the turn rate and the steering
+-- lag below carry most of the weight.
 DrivingConfig.LoadPenalty = {
-	topSpeed = 0.15,
-	accel = 0.35,
-	brakeDecel = 0.30,
-	grip = 0.40,
-	turnRate = 0.20,
+	topSpeed = 0.18,
+	accel = 0.45,
+	brakeDecel = 0.38,
+	grip = 0.55,
+	turnRate = 0.35,
+	-- Seconds for the steering to catch up to your input at full load.
+	-- At zero load steering is instant, so this is the main thing that
+	-- makes a loaded bus feel heavy rather than just slow.
+	steerLag = 0.28,
+}
+
+-- Engine strain ----------------------------------------------------------------------
+-- Holding near your top speed cooks the engine: strain climbs while you're
+-- above ThresholdFraction of top speed and bleeds off below it. At 1 the
+-- bus breaks down. The Engine upgrade raises top speed, so it also raises
+-- the speed you can hold before the needle starts climbing at all.
+--
+-- Published on the bus as the "Strain" attribute, which drives the red
+-- vignette and the screen shake (DriverScreenEffects.client.lua).
+DrivingConfig.Strain = {
+	ThresholdFraction = 0.85,
+	RisePerSecond = 0.13, -- ~8s flat out from cold to a breakdown
+	FallPerSecond = 0.38, -- backing off recovers faster than pushing builds
+	WarnAt = 0.4, -- vignette starts creeping in here
+	ShakeAt = 0.72, -- and the screen starts shaking here
+	AfterBreakdown = 0.5, -- strain left over after a strain breakdown
+}
+
+-- Post-breakdown impairment ------------------------------------------------------------
+-- A breakdown used to be a flat time tax with no consequence once you were
+-- rolling again. Now one system limps afterwards and recovers over
+-- Seconds, so there's a reason to drive carefully on the way home --
+-- without the death spiral that permanent damage would cause.
+DrivingConfig.Impair = {
+	Seconds = 25,
+	AccelMultiplier = 0.5, -- "Accel": slow to wind back up
+	SteerMultiplier = 0.45, -- "Steer": vague, slow-responding steering
 }
 
 -- Arcade controller -------------------------------------------------------------
@@ -42,7 +78,9 @@ DrivingConfig.Controller = {
 	GripRecoverTime = 0.6, -- seconds of calm driving to regain traction
 	LateralDamping = 6, -- how fast sideways velocity is killed while gripping
 	GroundRayLength = 12, -- studs below the root to look for ground
-	BodyRollMaxDegrees = 6,
+	-- Visible lean in corners. Scales with load, so a full bus visibly
+	-- wallows -- the main cue that you're carrying too many people.
+	BodyRollMaxDegrees = 14,
 	AlignResponsiveness = 14,
 	DriveForcePerMass = 150, -- horizontal force limit = assembly mass * this
 	HoverStiffness = 10, -- vertical correction toward ride height

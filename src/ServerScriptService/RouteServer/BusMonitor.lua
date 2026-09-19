@@ -46,6 +46,24 @@ local StopEvent = Remotes:WaitForChild("StopEvent")
 
 local C = DrivingConfig.Collision
 local O = DrivingConfig.OffRoad
+local S = DrivingConfig.Strain
+local I = DrivingConfig.Impair
+
+--[[
+	The top speed this bus can legitimately be doing right now.
+
+	A RouteWars goat horn multiplies top speed for a few seconds, which is
+	well past the anti-cheat tolerance -- without accounting for it, using
+	the boost would flag you as speed-hacking and reset your bus onto the
+	road mid-overtake.
+]]
+local function effectiveTopSpeed(bus, stats)
+	local boostUntil = bus:GetAttribute("BoostUntil")
+	if boostUntil and workspace:GetServerTimeNow() < boostUntil then
+		return stats.topSpeed * (bus:GetAttribute("BoostSpeedMult") or 1)
+	end
+	return stats.topSpeed
+end
 
 local BusMonitor = {}
 
@@ -123,6 +141,11 @@ end
 local function breakDown(player, bus, stats, callbacks)
 	bus:SetAttribute("Health", 0)
 	bus:SetAttribute("BrokenDown", true)
+	-- Something comes back wrong afterwards. Which system fails is random,
+	-- so breakdowns don't all feel the same, and it recovers on its own
+	-- (DrivingConfig.Impair) rather than sticking for the whole race.
+	bus:SetAttribute("ImpairKind", math.random() < 0.5 and "Accel" or "Steer")
+	bus:SetAttribute("ImpairUntil", workspace:GetServerTimeNow() + C.BreakdownSeconds + I.Seconds)
 	if callbacks.onBreakdown then
 		callbacks.onBreakdown(player)
 	end
@@ -188,6 +211,8 @@ local function sample(player, record, now)
 			offRoadSince = nil,
 			lastContactAt = nil,
 			flippedSince = nil,
+			strain = 0,
+			strainAt = now,
 		}
 		states[player] = state
 	end
@@ -204,6 +229,7 @@ local function sample(player, record, now)
 	distances[player] = (distances[player] or 0) + horizontal(position - previous.position)
 
 	local stats = BusStats.Compute(record.chassisId, record.levels, bus:GetAttribute("Passengers") or 0)
+	local topSpeed = effectiveTopSpeed(bus, stats)
 
 	-- Falling out of the world
 	if position.Y < record.track.center.Y + C.FallResetY then
@@ -213,7 +239,7 @@ local function sample(player, record, now)
 
 	-- Teleport check
 	local elapsed = math.max(now - previous.t, 1e-3)
-	if horizontal(position - previous.position) > stats.topSpeed * C.SpeedTolerance * elapsed + C.MaxTeleportStuds then
+	if horizontal(position - previous.position) > topSpeed * C.SpeedTolerance * elapsed + C.MaxTeleportStuds then
 		resetBus(player, record, previous.position)
 		return
 	end
@@ -252,8 +278,37 @@ local function sample(player, record, now)
 		end
 	end
 
-	-- Over-speed check
-	if recentSpeed > stats.topSpeed * C.SpeedTolerance + 5 then
+	-- Engine strain: hold near your top speed and the engine cooks. Easing
+	-- off bleeds it away faster than pushing builds it, so this is a
+	-- push-your-luck cost rather than a hard speed limit.
+	if not bus:GetAttribute("BrokenDown") then
+		local elapsedStrain = now - (state.strainAt or now)
+		state.strainAt = now
+		local strain = state.strain or 0
+		if recentSpeed > topSpeed * S.ThresholdFraction then
+			strain = strain + S.RisePerSecond * elapsedStrain
+		else
+			strain = strain - S.FallPerSecond * elapsedStrain
+		end
+		state.strain = math.clamp(strain, 0, 1)
+
+		-- Attributes replicate, so only write when it actually moved.
+		local shown = math.floor(state.strain * 50 + 0.5) / 50
+		if bus:GetAttribute("Strain") ~= shown then
+			bus:SetAttribute("Strain", shown)
+		end
+
+		if state.strain >= 1 then
+			state.strain = S.AfterBreakdown
+			bus:SetAttribute("Strain", S.AfterBreakdown)
+			StopEvent:FireClient(player, { kind = "strain" })
+			breakDown(player, bus, stats, callbacks)
+			return
+		end
+	end
+
+	-- Over-speed check (anti-cheat, not the strain system above)
+	if recentSpeed > topSpeed * C.SpeedTolerance + 5 then
 		state.speedStrikes = state.speedStrikes + 1
 		if state.speedStrikes >= C.SpeedStrikesToReset then
 			resetBus(player, record, position)

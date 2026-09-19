@@ -75,10 +75,12 @@ local function trackBus(bus)
 	smoke.Name = "DamageSmoke"
 	smoke.Texture = SMOKE_TEXTURE
 	smoke.Rate = 0
-	smoke.Lifetime = NumberRange.new(1.5, 2.6)
-	smoke.Speed = NumberRange.new(4, 8)
-	smoke.SpreadAngle = Vector2.new(18, 18)
-	smoke.Acceleration = Vector3.new(0, 3, 0)
+	-- Long-lived and fast-rising, so a damaged bus drags a visible column
+	-- of smoke behind it rather than puffing and clearing instantly.
+	smoke.Lifetime = NumberRange.new(2.6, 4.2)
+	smoke.Speed = NumberRange.new(9, 16)
+	smoke.SpreadAngle = Vector2.new(28, 28)
+	smoke.Acceleration = Vector3.new(0, 9, 0)
 	smoke.RotSpeed = NumberRange.new(-40, 40)
 	smoke.Rotation = NumberRange.new(0, 360)
 	smoke.Parent = attachment

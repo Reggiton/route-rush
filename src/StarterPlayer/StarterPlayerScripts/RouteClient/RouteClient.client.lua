@@ -240,6 +240,8 @@ StopEvent.OnClientEvent:Connect(function(event)
 		UIKit.Tween(label, { TextTransparency = 0 }, 0.25)
 	elseif event.kind == "impact" then
 		hud.toast(string.format("Hit %s  ·  −%d HP", tostring(event.what), event.damage), "Warning")
+	elseif event.kind == "strain" then
+		hud.toast("Engine blew — you held it flat out too long", "Negative")
 	elseif event.kind == "towed" then
 		hud.toast(string.format("Off the road — towed back (%ds)", event.seconds or 0), "Negative")
 	elseif event.kind == "lost" then
